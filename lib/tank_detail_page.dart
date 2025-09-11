@@ -151,7 +151,7 @@ class _TankDetailPageState extends State<TankDetailPage>
           decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
           child: Row(
             children: [
-              const Icon(Icons.aquarium, color: Colors.white, size: 28),
+              const Icon(Icons.water, color: Colors.white, size: 28),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -655,8 +655,10 @@ class ParameterCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text('${reading.value % 1 == 0 ? reading.value.toInt() : reading.value.toStringAsFixed(2)} ${reading.unit}',
-              style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(
+            '${reading.value % 1 == 0 ? reading.value.toInt() : reading.value.toStringAsFixed(2)} ${reading.unit}',
+            style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 4),
           Text('Ideal: ${reading.goodRange.start}-${reading.goodRange.end} ${reading.unit}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
           const SizedBox(height: 2),
@@ -664,6 +666,37 @@ class ParameterCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  // ---- helpers local to ParameterCard ----
+  Color _statusColor(ParameterReading r) {
+    final v = r.value;
+    if (v >= r.goodRange.start && v <= r.goodRange.end) return Colors.tealAccent;
+
+    // 10% tolerance outside the good range = warn; otherwise = critical
+    final span = r.goodRange.end - r.goodRange.start;
+    final lowerWarn = r.goodRange.start - 0.1 * span;
+    final upperWarn = r.goodRange.end + 0.1 * span;
+    if (v >= lowerWarn && v <= upperWarn) return Colors.orangeAccent;
+
+    return Colors.redAccent;
+  }
+
+  IconData _iconFor(ParamType t) {
+    switch (t) {
+      case ParamType.temperature:
+        return Icons.thermostat;
+      case ParamType.ph:
+        return Icons.science;
+      case ParamType.tds:
+        return Icons.bubble_chart;
+      case ParamType.nh3:
+        return Icons.warning_amber_rounded;
+      case ParamType.no2:
+        return Icons.bloodtype;
+      case ParamType.no3:
+        return Icons.grass;
+    }
   }
 
   String _timeAgo(DateTime t) {
