@@ -7,7 +7,7 @@ Future<void> main() async {
 
   // Initialize supabase once at startup
   await Supabase.initialize(
-    url: 'https://dbflovgjvzqjejekflg.supabase.co',
+    url: 'https://dbfglovgjuzqiejekflg.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRiZmdsb3ZnanV6cWllamVrZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM4ODI2NzQsImV4cCI6MjA1OTQ1ODY3NH0.mzRht4dDiCC9GQlX_5c1K_UJKWXvKeAHPBHqBVNsHvU',
   );
 
