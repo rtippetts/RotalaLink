@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // match system brightness
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart'; // 👈 Import your login page
+import 'welcome_page.dart'; // import welcome page
+import 'ui/aqua_theme.dart';
+import 'ui/aqua_schemes.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,21 +19,25 @@ Future<void> main() async {
 }
 
 
-
-
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'RotalaLink',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const LoginPage(), // 👈 Set LoginPage as the home screen
-    );
-  }
+  
+@override
+Widget build(BuildContext context) {
+  final cs = oceanCore; // or use MediaQuery to detect dark mode
+  SystemChrome.setSystemUIOverlayStyle(
+    cs.brightness == Brightness.dark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark,
+  );
+
+  return MaterialApp(
+    title: 'RotalaLink',
+    theme: aquaTheme(oceanCore),
+    darkTheme: aquaTheme(deepSeaDark),
+    themeMode: ThemeMode.system,
+    home: const WelcomePage(),
+  );
+}
 }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home.dart';
 import 'forgot_password.dart';
-import 'sign_up.dart';
+import 'auth/sign_up_first.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -15,6 +15,7 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController(text: "");
   final _passwordController = TextEditingController(text: "");
   bool _loading = false;
+  bool _obscure = true;
 
   @override
   void dispose() {
@@ -35,24 +36,15 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _loading = true);
     try {
       final supabase = Supabase.instance.client;
+      await supabase.auth.signInWithPassword(email: email, password: password);
 
-      // Email + password sign-in
-      final res = await supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-
-      // If email confirmations are ON and user hasn’t confirmed,
-      // Supabase throws an AuthException. Otherwise res.session is non-null.
       if (!mounted) return;
 
-      // Logged in: go to Home
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
       );
     } on AuthException catch (e) {
-      // Common messages: "Invalid login credentials", "Email not confirmed"
       _showAlert("Login failed", e.message);
     } catch (e) {
       _showAlert("Unexpected error", e.toString());
@@ -74,112 +66,124 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFF999999)),
-      filled: true,
-      fillColor: const Color(0xFF1f2937),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFF374151)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFF374151)),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF111827),
+      backgroundColor: cs.background,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const Text(
-                "RotalaLink",
-                style: TextStyle(
-                  fontSize: 40,
-                  color: Color(0xFF06b6d4),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Email
-              TextField(
-                controller: _emailController,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.emailAddress,
-                decoration: _inputDecoration("Email"),
-              ),
-              const SizedBox(height: 16),
-
-              // Password
-              TextField(
-                controller: _passwordController,
-                style: const TextStyle(color: Colors.white),
-                obscureText: true,
-                decoration: _inputDecoration("Password"),
-              ),
-              const SizedBox(height: 16),
-
-              // Forgot password
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
-                    );
-                  },
-                  child: const Text(
-                    "Forgot password?",
-                    style: TextStyle(color: Color(0xFF06b6d4), fontWeight: FontWeight.bold),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  "RotalaLink",
+                  style: textTheme.displaySmall?.copyWith(
+                    color: cs.primary,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 24),
 
-              // Log in button
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF06b6d4),
-                  minimumSize: const Size.fromHeight(50),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                // Email
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [AutofillHints.username, AutofillHints.email],
+                  decoration: const InputDecoration(
+                    labelText: "Email",
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                  enabled: !_loading,
                 ),
-                onPressed: _loading ? null : _login,
-                child: _loading
-                    ? const SizedBox(
-                    height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text("Log In", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
 
-              // Go to Sign up
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text("Don't have an account?",
-                      style: TextStyle(color: Color(0xFF9ca3af), fontSize: 14)),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const SignUpPage()));
-                    },
-                    child: const Text(
-                      "Sign Up",
-                      style: TextStyle(color: Color(0xFF06b6d4), fontWeight: FontWeight.bold, fontSize: 14),
+                // Password
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscure,
+                  autofillHints: const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      onPressed: _loading ? null : () => setState(() => _obscure = !_obscure),
+                      icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                      tooltip: _obscure ? "Show password" : "Hide password",
                     ),
                   ),
-                ],
-              ),
-            ],
+                  enabled: !_loading,
+                ),
+                const SizedBox(height: 12),
+
+                // Forgot password
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
+                            );
+                          },
+                    child: const Text("Forgot password?"),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Log in button
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: FilledButton(
+                    onPressed: _loading ? null : _login,
+                    child: _loading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(
+                            "Log In",
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Go to Sign up
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "Do not have an account?",
+                      style: TextStyle(color: cs.onSurface.withOpacity(.7), fontSize: 14),
+                    ),
+                    TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const SignUpFirstNamePage()),
+                              );
+                            },
+                      child: const Text(
+                        "Sign Up",
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
