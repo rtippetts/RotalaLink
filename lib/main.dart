@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // match system brightness
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'login_page.dart'; // 👈 Import your login page
-import 'welcome_page.dart'; // import welcome page
-import 'ui/aqua_theme.dart';
+
+import 'login_page.dart';
+import 'welcome_page.dart';
+import 'auth/reset_password.dart';
 import 'ui/aqua_schemes.dart';
+import 'ui/aqua_theme.dart';
+
+final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,26 +23,49 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  
-@override
-Widget build(BuildContext context) {
-  final cs = oceanCore; // or use MediaQuery to detect dark mode
-  SystemChrome.setSystemUIOverlayStyle(
-    cs.brightness == Brightness.dark
-        ? SystemUiOverlayStyle.light
-        : SystemUiOverlayStyle.dark,
-  );
-
-  return MaterialApp(
-    title: 'RotalaLink',
-    theme: aquaTheme(oceanCore),
-    darkTheme: aquaTheme(deepSeaDark),
-    themeMode: ThemeMode.system,
-    home: const WelcomePage(),
-  );
+  @override
+  State<MyApp> createState() => _MyAppState();
 }
+
+class _MyAppState extends State<MyApp> {
+  StreamSubscription<AuthState>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+
+      if (event == AuthChangeEvent.passwordRecovery) {
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(builder: (_) => const ResetPasswordPage()),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A) Ocean Core  |  B) Coral Lead  |  C) Deep Blue
+    final light = oceanCoreLight;  // or coralLeadLight, deepBlueLight
+    final dark  = oceanCoreDark;   // or coralLeadDark,  deepBlueDark
+
+    return MaterialApp(
+      navigatorKey: navigatorKey, // 👈 important!
+      title: 'RotalaLink',
+      theme: aquaTheme(light),
+      darkTheme: aquaTheme(dark),
+      themeMode: ThemeMode.system,
+      home: const WelcomePage(),
+    );
+  }
 }

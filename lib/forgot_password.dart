@@ -1,3 +1,4 @@
+// lib/forgot_password.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -10,6 +11,7 @@ class ForgotPasswordPage extends StatefulWidget {
 
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _email = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   bool _loading = false;
 
   @override
@@ -19,25 +21,22 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   }
 
   Future<void> _sendReset() async {
-    final email = _email.text.trim();
-    if (email.isEmpty) {
-      _showSnack('Enter your email address.');
-      return;
-    }
+    if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _loading = true);
     try {
-      final supabase = Supabase.instance.client;
+      final client = Supabase.instance.client;
 
-      await supabase.auth.resetPasswordForEmail(
-        email,
-        // If you configure app links / deep links, set your callback here:
-        // redirectTo: 'io.supabase.flutter://login-callback/',
-      );
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        _email.text.trim()  ,
+        redirectTo: 'rotala://auth-reset', // 👈 important
+);
 
       if (!mounted) return;
-      _showSnack('Check your email for the reset link.');
-      Navigator.pop(context); // back to login
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Check your email for the reset link.')),
+      );
+      Navigator.pop(context); // back to previous (e.g., Login)
     } on AuthException catch (e) {
       _showSnack(e.message);
     } catch (e) {
@@ -53,56 +52,86 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF111827),
+      backgroundColor: cs.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF111827),
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('Forgot Password', style: TextStyle(color: Colors.white)),
+        title: const Text('Forgot password'),
+        centerTitle: true,
+        leading: const BackButton(),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Enter your account email and we’ll send a reset link.',
-              style: TextStyle(color: Color(0xFF9ca3af)),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'you@example.com',
-                hintStyle: const TextStyle(color: Color(0xFF999999)),
-                filled: true,
-                fillColor: const Color(0xFF1f2937),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
-                ),
+      body: Align(
+        alignment: const Alignment(0, -0.35), // similar vertical feel to your sign-up screens
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Heading (matches Create Account style)
+                  Text(
+                    'Reset your password',
+                    textAlign: TextAlign.center,
+                    style: textTheme.displaySmall?.copyWith(
+                      color: cs.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter the email associated with your account and we’ll send you a reset link.',
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurface.withOpacity(.75),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Email field (uses your InputDecorationTheme)
+                  TextFormField(
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.username, AutofillHints.email],
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email_outlined),
+                    ),
+                    validator: (v) {
+                      final value = (v ?? '').trim();
+                      if (value.isEmpty) return 'Email is required';
+                      final ok = RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(value);
+                      if (!ok) return 'Enter a valid email';
+                      return null;
+                    },
+                    enabled: !_loading,
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // CTA (uses FilledButtonTheme)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: FilledButton(
+                      onPressed: _loading ? null : _sendReset,
+                      child: _loading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Send reset link'),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loading ? null : _sendReset,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF06b6d4),
-                minimumSize: const Size.fromHeight(50),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: _loading
-                  ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Send reset link', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+          ),
         ),
       ),
     );
