@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// ----------------------------------------------
-/// Tank Detail Page (RotalaLink style)
-/// ----------------------------------------------
-/// This page shows a single aquarium ("tank") with tabs for
-/// Overview, Parameters, Devices, Logs, Dosing, and Charts.
+/// --------------------------------------------------------
+/// Tank Detail Page — RotalaLink (Overview + Logs + Tasks)
+/// --------------------------------------------------------
+/// • Only Temperature, pH, TDS
+/// • Trends chart (7 days) lives on Overview with toggles
+/// • Logs unchanged
+/// • Dosing -> Tasks (checkbox list)
+/// • Powered by Supabase `measurements` table
 ///
-/// It uses in-memory demo data. Wire it to your backend later.
-/// Dark theme colors match prior pages: background 0xFF111827, card 0xFF1f2937.
+/// Expected `measurements` columns:
+///   tank_id (uuid), measured_at (timestamptz),
+///   temperature_c (double), ph (double), tds_ppm (double)
 
 class TankDetailPage extends StatefulWidget {
   const TankDetailPage({super.key, required this.tank});
-
   final Tank tank;
 
   @override
@@ -21,42 +26,69 @@ class TankDetailPage extends StatefulWidget {
 class _TankDetailPageState extends State<TankDetailPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  late List<ParameterReading> _readings; // latest-by-parameter
-  late List<DeviceInfo> _devices;
-  late List<TankLog> _logs;
-  late List<DoseSchedule> _doses;
+
+  // Supabase data
+  bool _loading = true;
+  List<MeasurePoint> _points = [];
+
+  // toggle which series to show
+  bool showTemp = true;
+  bool showPh = true;
+  bool showTds = true;
+
+  // Logs & Tasks (local demo – keep your existing hooks if you have them)
+  final List<TankLog> _logs = [
+    TankLog(when: DateTime.now().subtract(const Duration(hours: 6)), text: '25% water change. Vacuumed substrate.'),
+    TankLog(when: DateTime.now().subtract(const Duration(days: 1, hours: 2)), text: 'Added 10 mL all-in-one fertilizer.'),
+  ];
+  final List<TaskItem> _tasks = [
+    TaskItem('Clean glass', due: DateTime.now().add(const Duration(days: 2))),
+    TaskItem('Rinse filter media', due: DateTime.now().add(const Duration(days: 7))),
+    TaskItem('Top-off water', due: DateTime.now().add(const Duration(days: 1))),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _loadMeasurements(); // fetch 7-day window
+  }
 
-    // --- Demo data ---
-    _readings = [
-      ParameterReading(type: ParamType.temperature, value: 25.3, unit: '°C', goodRange: const RangeValues(24, 26), timestamp: DateTime.now().subtract(const Duration(hours: 2))),
-      ParameterReading(type: ParamType.ph, value: 7.2, unit: 'pH', goodRange: const RangeValues(6.8, 7.6), timestamp: DateTime.now().subtract(const Duration(hours: 1))),
-      ParameterReading(type: ParamType.tds, value: 180, unit: 'ppm', goodRange: const RangeValues(120, 220), timestamp: DateTime.now().subtract(const Duration(hours: 3))),
-      ParameterReading(type: ParamType.nh3, value: 0, unit: 'ppm', goodRange: const RangeValues(0, 0.2), timestamp: DateTime.now().subtract(const Duration(days: 1))),
-      ParameterReading(type: ParamType.no2, value: 0.05, unit: 'ppm', goodRange: const RangeValues(0, 0.2), timestamp: DateTime.now().subtract(const Duration(days: 1))),
-      ParameterReading(type: ParamType.no3, value: 12, unit: 'ppm', goodRange: const RangeValues(5, 20), timestamp: DateTime.now().subtract(const Duration(days: 1))),
-    ];
+  Future<void> _loadMeasurements() async {
+    try {
+      final supabase = Supabase.instance.client;
 
-    _devices = [
-      DeviceInfo(name: 'ESP32 Sensor Hub', type: 'Probe Bridge', status: DeviceStatus.online, lastSeen: DateTime.now().subtract(const Duration(minutes: 5))),
-      DeviceInfo(name: 'AquaHeater 150W', type: 'Heater', status: DeviceStatus.online, lastSeen: DateTime.now().subtract(const Duration(minutes: 1))),
-      DeviceInfo(name: 'Canister Filter FX4', type: 'Filter', status: DeviceStatus.offline, lastSeen: DateTime.now().subtract(const Duration(hours: 10))),
-    ];
+      final fromDate =
+      DateTime.now().subtract(const Duration(days: 7)).toUtc().toIso8601String();
 
-    _logs = [
-      TankLog(when: DateTime.now().subtract(const Duration(hours: 6)), text: '25% water change. Vacuumed substrate.'),
-      TankLog(when: DateTime.now().subtract(const Duration(days: 1, hours: 2)), text: 'Added 10 mL all-in-one fertilizer.'),
-      TankLog(when: DateTime.now().subtract(const Duration(days: 2)), text: 'Cleaned filter intake.'),
-    ];
+      final rows = await supabase
+          .from('measurements')
+          .select('measured_at, temperature_c, ph, tds_ppm')
+          .eq('tank_id', widget.tank.id)
+          .gte('measured_at', fromDate)
+          .order('measured_at', ascending: true);
 
-    _doses = [
-      DoseSchedule(name: 'All-in-One', amountMl: 10, cadence: 'Every other day', nextDue: DateTime.now().add(const Duration(days: 1))),
-      DoseSchedule(name: 'Potassium', amountMl: 6, cadence: 'Weekly', nextDue: DateTime.now().add(const Duration(days: 5))),
-    ];
+      final pts = (rows as List)
+          .map((r) => MeasurePoint(
+        at: DateTime.parse(r['measured_at']).toLocal(),
+        tempC: (r['temperature_c'] as num?)?.toDouble(),
+        ph: (r['ph'] as num?)?.toDouble(),
+        tds: (r['tds_ppm'] as num?)?.toDouble(),
+      ))
+          .toList();
+
+      setState(() {
+        _points = pts;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load data: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -65,10 +97,50 @@ class _TankDetailPageState extends State<TankDetailPage>
     super.dispose();
   }
 
+  // --- computed latest values for the overview tiles
+  ParameterReading? get latestTemp {
+    final v = _points.where((p) => p.tempC != null).toList();
+    if (v.isEmpty) return null;
+    final last = v.last;
+    return ParameterReading(
+      type: ParamType.temperature,
+      value: last.tempC!,
+      unit: '°C',
+      goodRange: const RangeValues(24, 26),
+      timestamp: last.at,
+    );
+  }
+
+  ParameterReading? get latestPh {
+    final v = _points.where((p) => p.ph != null).toList();
+    if (v.isEmpty) return null;
+    final last = v.last;
+    return ParameterReading(
+      type: ParamType.ph,
+      value: last.ph!,
+      unit: 'pH',
+      goodRange: const RangeValues(6.8, 7.6),
+      timestamp: last.at,
+    );
+  }
+
+  ParameterReading? get latestTds {
+    final v = _points.where((p) => p.tds != null).toList();
+    if (v.isEmpty) return null;
+    final last = v.last;
+    return ParameterReading(
+      type: ParamType.tds,
+      value: last.tds!,
+      unit: 'ppm',
+      goodRange: const RangeValues(120, 220),
+      timestamp: last.at,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xFF111827);
-    final card = const Color(0xFF1f2937);
+    const bg = Color(0xFF111827);
+    const card = Color(0xFF1f2937);
 
     return Scaffold(
       backgroundColor: bg,
@@ -87,68 +159,58 @@ class _TankDetailPageState extends State<TankDetailPage>
             Text(widget.tank.name, style: const TextStyle(color: Colors.white)),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Edit tank',
-            onPressed: _onEditTank,
-            icon: const Icon(Icons.edit),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          indicatorColor: Colors.tealAccent,
-          tabs: const [
-            Tab(text: 'Overview'),
-            Tab(text: 'Parameters'),
-            Tab(text: 'Devices'),
-            Tab(text: 'Logs'),
-            Tab(text: 'Dosing'),
-            Tab(text: 'Charts'),
-          ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(4),
+          child: SizedBox(height: 4),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addReading,
-        backgroundColor: Colors.teal,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Reading'),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: TabBarView(
-          controller: _tabController,
+      body: DefaultTabController(
+        length: 3,
+        child: Column(
           children: [
-            _buildOverview(card),
-            _buildParameters(card),
-            _buildDevices(card),
-            _buildLogs(card),
-            _buildDosing(card),
-            _buildCharts(card),
+            const TabBar(
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.tealAccent,
+              tabs: [
+                Tab(text: 'Overview'),
+                Tab(text: 'Logs'),
+                Tab(text: 'Tasks'),
+              ],
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _loadMeasurements,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildOverview(card),
+                    _buildLogs(card),
+                    _buildTasks(card),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _refresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    if (mounted) setState(() {});
-  }
-
   // ----------------------------- Overview -----------------------------
   Widget _buildOverview(Color card) {
-    final latest = _readings;
-    final subtitle = '${widget.tank.volumeLiters.toStringAsFixed(0)} L • ${widget.tank.inhabitants}';
+    final tiles = [latestTemp, latestPh, latestTds].whereType<ParameterReading>().toList();
+    final subtitle =
+        '${widget.tank.volumeLiters.toStringAsFixed(0)} L • ${widget.tank.inhabitants}';
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // header
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
+          decoration:
+          BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
           child: Row(
             children: [
               const Icon(Icons.water, color: Colors.white, size: 28),
@@ -157,7 +219,11 @@ class _TankDetailPageState extends State<TankDetailPage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.tank.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(widget.tank.name,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     Text(subtitle, style: const TextStyle(color: Colors.white70)),
                   ],
@@ -168,34 +234,81 @@ class _TankDetailPageState extends State<TankDetailPage>
           ),
         ),
         const SizedBox(height: 16),
+
+        // summary tiles
         Wrap(
           spacing: 12,
           runSpacing: 12,
-          children: latest
-              .map((r) => SizedBox(
-            width: 160,
-            child: ParameterCard(reading: r),
-          ))
+          children: tiles
+              .map((r) => SizedBox(width: 160, child: ParameterCard(reading: r)))
               .toList(),
         ),
+
         const SizedBox(height: 24),
+
+        // Trends + toggles
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration:
+          BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Trends (7 days)',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 220,
+                child: _loading
+                    ? const Center(
+                    child: CircularProgressIndicator(color: Colors.teal))
+                    : _points.isEmpty
+                    ? const Center(
+                    child: Text('No measurements yet',
+                        style: TextStyle(color: Colors.white54)))
+                    : LineChart(_buildChartData()),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: [
+                  FilterChip(
+                    selected: showTemp,
+                    label: const Text('Temperature'),
+                    onSelected: (v) => setState(() => showTemp = v),
+                  ),
+                  FilterChip(
+                    selected: showPh,
+                    label: const Text('pH'),
+                    onSelected: (v) => setState(() => showPh = v),
+                  ),
+                  FilterChip(
+                    selected: showTds,
+                    label: const Text('TDS'),
+                    onSelected: (v) => setState(() => showTds = v),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // quick actions
         Row(
           children: [
             Expanded(
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: _addReading,
-                icon: const Icon(Icons.add),
-                label: const Text('Add Reading'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: _onEditTank,
-                icon: const Icon(Icons.edit),
-                label: const Text('Edit Tank'),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
+                onPressed: _loadMeasurements,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh'),
               ),
             ),
           ],
@@ -204,60 +317,74 @@ class _TankDetailPageState extends State<TankDetailPage>
     );
   }
 
+  LineChartData _buildChartData() {
+    final baseTs = _points.first.at.millisecondsSinceEpoch.toDouble();
+
+    List<FlSpot> mk(List<double?> ys) {
+      final spots = <FlSpot>[];
+      for (int i = 0; i < _points.length; i++) {
+        final y = ys[i];
+        if (y == null) continue;
+        final x = (_points[i].at.millisecondsSinceEpoch - baseTs) / 1000 / 3600; // hours
+        spots.add(FlSpot(x, y));
+      }
+      return spots;
+    }
+
+    final tempSpots = mk(_points.map((e) => e.tempC).toList());
+    final phSpots = mk(_points.map((e) => e.ph).toList());
+    final tdsSpots = mk(_points.map((e) => e.tds).toList());
+
+    final lines = <LineChartBarData>[];
+    if (showTemp && tempSpots.isNotEmpty) {
+      lines.add(LineChartBarData(spots: tempSpots, isCurved: true, dotData: FlDotData(show: false)));
+    }
+    if (showPh && phSpots.isNotEmpty) {
+      lines.add(LineChartBarData(spots: phSpots, isCurved: true, dotData: FlDotData(show: false)));
+    }
+    if (showTds && tdsSpots.isNotEmpty) {
+      lines.add(LineChartBarData(spots: tdsSpots, isCurved: true, dotData: FlDotData(show: false)));
+    }
+
+    return LineChartData(
+      lineBarsData: lines,
+      gridData: FlGridData(show: true, drawVerticalLine: false),
+      titlesData: FlTitlesData(
+        bottomTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            interval: 24, // hours
+            getTitlesWidget: (x, meta) =>
+                Text('${x.toInt()}h', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ),
+        ),
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 36,
+            getTitlesWidget: (y, meta) =>
+                Text(y.toStringAsFixed(0), style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ),
+        ),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      ),
+      borderData: FlBorderData(show: false),
+    );
+  }
+
   String _lastUpdatedText() {
-    final latest = _readings.map((r) => r.timestamp).fold<DateTime?>(null, (prev, e) => prev == null || e.isAfter(prev) ? e : prev);
-    if (latest == null) return 'No data';
+    final all = [
+      if (latestTemp != null) latestTemp!.timestamp,
+      if (latestPh != null) latestPh!.timestamp,
+      if (latestTds != null) latestTds!.timestamp,
+    ];
+    if (all.isEmpty) return 'No data';
+    final latest = all.reduce((a, b) => a.isAfter(b) ? a : b);
     final diff = DateTime.now().difference(latest);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
-  }
-
-  // ----------------------------- Parameters -----------------------------
-  Widget _buildParameters(Color card) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemBuilder: (context, i) {
-        final r = _readings[i];
-        return Container(
-          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
-          child: ListTile(
-            leading: Icon(_iconFor(r.type), color: _statusColor(r)),
-            title: Text(paramLabel(r.type), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            subtitle: Text('Updated ${_timeAgo(r.timestamp)} • Range ${r.goodRange.start}-${r.goodRange.end} ${r.unit}', style: const TextStyle(color: Colors.white70)),
-            trailing: Text('${_fmt(r.value)} ${r.unit}', style: TextStyle(color: _statusColor(r), fontWeight: FontWeight.bold)),
-            onTap: () => _addReading(prefilled: r.type),
-          ),
-        );
-      },
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemCount: _readings.length,
-    );
-  }
-
-  // ----------------------------- Devices -----------------------------
-  Widget _buildDevices(Color card) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _devices.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, i) {
-        final d = _devices[i];
-        return Container(
-          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
-          child: ListTile(
-            leading: Icon(Icons.memory, color: d.status == DeviceStatus.online ? Colors.tealAccent : Colors.orangeAccent),
-            title: Text(d.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            subtitle: Text('${d.type} • ${d.status.name.toUpperCase()} • last seen ${_timeAgo(d.lastSeen)}', style: const TextStyle(color: Colors.white70)),
-            trailing: IconButton(
-              tooltip: 'Details',
-              icon: const Icon(Icons.chevron_right, color: Colors.white70),
-              onPressed: () {},
-            ),
-          ),
-        );
-      },
-    );
   }
 
   // ----------------------------- Logs -----------------------------
@@ -268,16 +395,20 @@ class _TankDetailPageState extends State<TankDetailPage>
         for (final log in _logs)
           Container(
             margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+            decoration:
+            BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
             child: ListTile(
               leading: const Icon(Icons.event_note, color: Colors.white70),
               title: Text(log.text, style: const TextStyle(color: Colors.white)),
-              subtitle: Text(_timeExact(log.when), style: const TextStyle(color: Colors.white70)),
+              subtitle:
+              Text(_timeExact(log.when), style: const TextStyle(color: Colors.white70)),
             ),
           ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
+          style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Colors.white24)),
           onPressed: _addLog,
           icon: const Icon(Icons.add),
           label: const Text('Add Log Entry'),
@@ -286,101 +417,53 @@ class _TankDetailPageState extends State<TankDetailPage>
     );
   }
 
-  // ----------------------------- Dosing -----------------------------
-  Widget _buildDosing(Color card) {
+  // ----------------------------- Tasks -----------------------------
+  Widget _buildTasks(Color card) {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
-      itemCount: _doses.length + 1,
+      itemCount: _tasks.length + 1,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, i) {
-        if (i == _doses.length) {
+        if (i == _tasks.length) {
           return OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
-            onPressed: _addDose,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Dosing Rule'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white24)),
+            onPressed: _addTask,
+            icon: const Icon(Icons.add_task),
+            label: const Text('Add Task'),
           );
         }
-        final d = _doses[i];
+        final t = _tasks[i];
         return Container(
           decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
-          child: ListTile(
-            leading: const Icon(Icons.science, color: Colors.white70),
-            title: Text(d.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            subtitle: Text('${d.amountMl} mL • ${d.cadence}', style: const TextStyle(color: Colors.white70)),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text('Next due', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                Text(_timeExact(d.nextDue), style: const TextStyle(color: Colors.white70)),
-              ],
-            ),
+          child: CheckboxListTile(
+            value: t.done,
+            onChanged: (v) => setState(() => t.done = v ?? false),
+            title: Text(t.title, style: const TextStyle(color: Colors.white)),
+            subtitle: t.due == null
+                ? null
+                : Text('Due ${_timeExact(t.due!)}',
+                style: const TextStyle(color: Colors.white70)),
+            controlAffinity: ListTileControlAffinity.leading,
+            checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            activeColor: Colors.teal,
           ),
         );
       },
     );
   }
 
-  // ----------------------------- Charts -----------------------------
-  Widget _buildCharts(Color card) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Trends (7 days)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Container(
-                height: 180,
-                decoration: BoxDecoration(color: const Color(0xFF0b1220), borderRadius: BorderRadius.circular(12)),
-                child: const Center(
-                  child: Text('Hook up fl_chart or your chart lib here', style: TextStyle(color: Colors.white54)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                children: ParamType.values
-                    .map((t) => FilterChip(
-                  label: Text(paramLabel(t)),
-                  selected: true,
-                  onSelected: (_) {},
-                ))
-                    .toList(),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ----------------------------- Actions -----------------------------
-  void _onEditTank() async {
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Edit Tank (demo)'),
-        content: Text('Name: ${widget.tank.name}\nVolume: ${widget.tank.volumeLiters} L'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        ],
-      ),
-    );
-  }
-
+  // ----------------------------- Small actions -----------------------------
   void _addLog() async {
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('New Log Entry'),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'What happened?')),
+        content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: 'What happened?')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
@@ -394,165 +477,57 @@ class _TankDetailPageState extends State<TankDetailPage>
     }
   }
 
-  void _addDose() async {
+  void _addTask() async {
     final name = TextEditingController();
-    final amount = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Add Dosing Rule'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: name, decoration: const InputDecoration(labelText: 'Name')),
-            TextField(controller: amount, decoration: const InputDecoration(labelText: 'Amount (mL)'), keyboardType: TextInputType.number),
-          ],
-        ),
+        title: const Text('Add Task'),
+        content: TextField(controller: name, decoration: const InputDecoration(labelText: 'Task title')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
         ],
       ),
     );
-    if (ok == true && name.text.isNotEmpty && double.tryParse(amount.text) != null) {
-      setState(() {
-        _doses.add(DoseSchedule(name: name.text.trim(), amountMl: double.parse(amount.text), cadence: 'Custom', nextDue: DateTime.now().add(const Duration(days: 3))));
-      });
-    }
-  }
-
-  void _addReading({ParamType? prefilled}) async {
-    ParamType selected = prefilled ?? ParamType.temperature;
-    final valueCtrl = TextEditingController();
-
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1f2937),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 16, left: 16, right: 16, top: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Add Reading', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<ParamType>(
-                value: selected,
-                dropdownColor: const Color(0xFF0b1220),
-                items: ParamType.values
-                    .map((t) => DropdownMenuItem(
-                  value: t,
-                  child: Text(paramLabel(t), style: const TextStyle(color: Colors.white)),
-                ))
-                    .toList(),
-                onChanged: (v) => selected = v ?? selected,
-                decoration: const InputDecoration(labelText: 'Parameter', labelStyle: TextStyle(color: Colors.white70)),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: valueCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Value', labelStyle: TextStyle(color: Colors.white70)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Save'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    final val = double.tryParse(valueCtrl.text);
-    if (ok == true && val != null) {
-      setState(() {
-        final idx = _readings.indexWhere((r) => r.type == selected);
-        final base = _readings[idx];
-        _readings[idx] = base.copyWith(value: val, timestamp: DateTime.now());
-        _logs.insert(0, TankLog(when: DateTime.now(), text: 'Added ${paramLabel(selected)} reading: ${_fmt(val)} ${base.unit}'));
-      });
+    if (ok == true && name.text.trim().isNotEmpty) {
+      setState(() => _tasks.add(TaskItem(name.text.trim())));
     }
   }
 
   // ----------------------------- Helpers -----------------------------
-  String _timeAgo(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return 'just now';
-    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
-    if (d.inHours < 24) return '${d.inHours} h ago';
-    return '${d.inDays} d ago';
-  }
-
   String _timeExact(DateTime t) {
-    final date = '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+    final date =
+        '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
     final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     return '$date • $time';
-  }
-
-  Color _statusColor(ParameterReading r) {
-    final v = r.value;
-    if (v >= r.goodRange.start && v <= r.goodRange.end) return Colors.tealAccent;
-    // If within 10% outside the range: warn; else critical
-    final span = r.goodRange.end - r.goodRange.start;
-    final lowerWarn = r.goodRange.start - 0.1 * span;
-    final upperWarn = r.goodRange.end + 0.1 * span;
-    if (v >= lowerWarn && v <= upperWarn) return Colors.orangeAccent;
-    return Colors.redAccent;
-  }
-
-  IconData _iconFor(ParamType t) {
-    switch (t) {
-      case ParamType.temperature:
-        return Icons.thermostat;
-      case ParamType.ph:
-        return Icons.science;
-      case ParamType.tds:
-        return Icons.bubble_chart;
-      case ParamType.nh3:
-        return Icons.warning_amber_rounded;
-      case ParamType.no2:
-        return Icons.bloodtype;
-      case ParamType.no3:
-        return Icons.grass;
-    }
-  }
-
-  String _fmt(num n) {
-    if (n % 1 == 0) return n.toInt().toString();
-    return n.toStringAsFixed(2);
   }
 }
 
 // ----------------------------- Models -----------------------------
 class Tank {
-  final String id;
+  final String id; // must be the same UUID as in Supabase tanks table
   final String name;
   final double volumeLiters;
-  final String inhabitants; // e.g., "Community • Neocaridina"
+  final String inhabitants;
 
-  const Tank({required this.id, required this.name, required this.volumeLiters, required this.inhabitants});
+  const Tank({
+    required this.id,
+    required this.name,
+    required this.volumeLiters,
+    required this.inhabitants,
+  });
 }
 
-enum ParamType { temperature, ph, tds, nh3, no2, no3 }
+class MeasurePoint {
+  MeasurePoint({required this.at, this.tempC, this.ph, this.tds});
+  final DateTime at;
+  final double? tempC;
+  final double? ph;
+  final double? tds;
+}
+
+enum ParamType { temperature, ph, tds }
 
 String paramLabel(ParamType t) {
   switch (t) {
@@ -562,12 +537,6 @@ String paramLabel(ParamType t) {
       return 'pH';
     case ParamType.tds:
       return 'TDS';
-    case ParamType.nh3:
-      return 'Ammonia (NH₃)';
-    case ParamType.no2:
-      return 'Nitrite (NO₂⁻)';
-    case ParamType.no3:
-      return 'Nitrate (NO₃⁻)';
   }
 }
 
@@ -585,41 +554,19 @@ class ParameterReading {
     required this.goodRange,
     required this.timestamp,
   });
-
-  ParameterReading copyWith({double? value, DateTime? timestamp}) => ParameterReading(
-    type: type,
-    value: value ?? this.value,
-    unit: unit,
-    goodRange: goodRange,
-    timestamp: timestamp ?? this.timestamp,
-  );
 }
-
-class DeviceInfo {
-  final String name;
-  final String type;
-  final DeviceStatus status;
-  final DateTime lastSeen;
-
-  const DeviceInfo({required this.name, required this.type, required this.status, required this.lastSeen});
-}
-
-enum DeviceStatus { online, offline }
 
 class TankLog {
   final DateTime when;
   final String text;
-
   const TankLog({required this.when, required this.text});
 }
 
-class DoseSchedule {
-  final String name;
-  final double amountMl;
-  final String cadence; // e.g., Daily, Weekly, Every other day
-  final DateTime nextDue;
-
-  const DoseSchedule({required this.name, required this.amountMl, required this.cadence, required this.nextDue});
+class TaskItem {
+  TaskItem(this.title, {this.done = false, this.due});
+  final String title;
+  bool done;
+  DateTime? due;
 }
 
 // ----------------------------- Widgets -----------------------------
@@ -660,25 +607,23 @@ class ParameterCard extends StatelessWidget {
             style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          Text('Ideal: ${reading.goodRange.start}-${reading.goodRange.end} ${reading.unit}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text('Ideal: ${reading.goodRange.start}-${reading.goodRange.end} ${reading.unit}',
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
           const SizedBox(height: 2),
-          Text(_timeAgo(reading.timestamp), style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(_timeAgo(reading.timestamp),
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
         ],
       ),
     );
   }
 
-  // ---- helpers local to ParameterCard ----
   Color _statusColor(ParameterReading r) {
     final v = r.value;
     if (v >= r.goodRange.start && v <= r.goodRange.end) return Colors.tealAccent;
-
-    // 10% tolerance outside the good range = warn; otherwise = critical
     final span = r.goodRange.end - r.goodRange.start;
     final lowerWarn = r.goodRange.start - 0.1 * span;
     final upperWarn = r.goodRange.end + 0.1 * span;
     if (v >= lowerWarn && v <= upperWarn) return Colors.orangeAccent;
-
     return Colors.redAccent;
   }
 
@@ -690,12 +635,6 @@ class ParameterCard extends StatelessWidget {
         return Icons.science;
       case ParamType.tds:
         return Icons.bubble_chart;
-      case ParamType.nh3:
-        return Icons.warning_amber_rounded;
-      case ParamType.no2:
-        return Icons.bloodtype;
-      case ParamType.no3:
-        return Icons.grass;
     }
   }
 
@@ -708,8 +647,8 @@ class ParameterCard extends StatelessWidget {
   }
 }
 
-// ----------------------------- Demo Entry -----------------------------
-/// Drop this widget somewhere to try the page quickly.
+// ----------------------------- Demo -----------------------------
+// Use this demo with your "My Third Tank" UUID to test quickly
 class TankDetailDemo extends StatelessWidget {
   const TankDetailDemo({super.key});
 
@@ -728,8 +667,9 @@ class TankDetailDemo extends StatelessWidget {
       ),
       home: TankDetailPage(
         tank: const Tank(
-          id: 't1',
-          name: 'Shrimp Paradise',
+          // 👇 replace with the UUID of "My Third Tank" from your Supabase `tanks` table
+          id: '691ae986-7002-47a9-9fb2-2e0288d88fb6',
+          name: 'My Third Tank',
           volumeLiters: 75,
           inhabitants: 'Neocaridina • Community',
         ),

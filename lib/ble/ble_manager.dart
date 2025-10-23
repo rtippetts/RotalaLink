@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -18,43 +18,45 @@ class BleManager {
   String? _deviceId;
   String? _deviceName;
 
-  // Nordic UART-style UUIDs
-  final Uuid serviceUuid =
-  Uuid.parse("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
-  final Uuid rxCharUuid =
-  Uuid.parse("6E400002-B5A3-F393-E0A9-E50E24DCCA9E"); // write
-  final Uuid txCharUuid =
-  Uuid.parse("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"); // notify
+  // Nordic UART UUIDs
+  final Uuid serviceUuid = Uuid.parse("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+  final Uuid rxCharUuid = Uuid.parse(
+    "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+  ); // write
+  final Uuid txCharUuid = Uuid.parse(
+    "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+  ); // notify
 
   QualifiedCharacteristic? _tx; // notify from ESP32 -> app
-  QualifiedCharacteristic? _rx; // write from app -> ESP32
+  QualifiedCharacteristic? _rx; // write from app   -> ESP32
 
   // -------- Permissions --------
   Future<bool> ensurePermissions() async {
     if (!Platform.isAndroid) return true;
 
-    // Android 12+ BLE perms
-    final scan = await Permission.bluetoothScan.request();
-    final connect = await Permission.bluetoothConnect.request();
+    // IMPORTANT: use a LIST, not a Set, so .request() exists.
+    final statuses =
+        await <Permission>[
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          // Some Android 10/11 devices still require location for scanning:
+          Permission.locationWhenInUse,
+        ].request();
 
-    // On Android <= 11 scanning needs location
-    if (await Permission.locationWhenInUse.isDenied) {
-      await Permission.locationWhenInUse.request();
-    }
-
-    return scan.isGranted && connect.isGranted;
+    return statuses.values.every((s) => s.isGranted);
   }
 
-  // -------- Scanning --------
+  // -------- Scanning (unfiltered; we filter in UI) --------
   Stream<DiscoveredDevice> startScan() {
     _scanSub?.cancel();
     final controller = StreamController<DiscoveredDevice>.broadcast();
 
     _scanSub = _ble
         .scanForDevices(
-      withServices: [serviceUuid],
-      scanMode: ScanMode.lowLatency,
-    )
+          withServices: const [], // all devices
+          scanMode: ScanMode.lowLatency,
+          requireLocationServicesEnabled: false,
+        )
         .listen(controller.add, onError: controller.addError);
 
     controller.onCancel = () async => await _scanSub?.cancel();
@@ -65,53 +67,66 @@ class BleManager {
 
   // -------- Single connection --------
   Future<void> connect(DiscoveredDevice device) async {
-    await disconnect(); // enforce 1-at-a-time
+    await disconnect(); // make sure only one at a time
 
     _deviceId = null;
     _deviceName = null;
+    _tx = null;
+    _rx = null;
 
     _connSub = _ble
         .connectToDevice(
-      id: device.id,
-      connectionTimeout: const Duration(seconds: 10),
-    )
-        .listen((update) async {
-      if (update.connectionState == DeviceConnectionState.connected) {
-        _deviceId = device.id;
-        _deviceName = device.name;
+          id: device.id,
+          connectionTimeout: const Duration(seconds: 12),
+        )
+        .listen(
+          (update) async {
+            switch (update.connectionState) {
+              case DeviceConnectionState.connected:
+                _deviceId = device.id;
+                _deviceName = device.name;
 
-        // Service discovery (legacy API that works across versions)
-        // ignore: deprecated_member_use
-        final List<DiscoveredService> services =
-        await _ble.discoverServices(device.id);
-
-        for (final s in services) {
-          if (s.serviceId == serviceUuid) {
-            for (final c in s.characteristics) {
-              if (c.characteristicId == txCharUuid) {
+                // Set up characteristics directly (we know the UUIDs)
                 _tx = QualifiedCharacteristic(
                   deviceId: device.id,
                   serviceId: serviceUuid,
                   characteristicId: txCharUuid,
                 );
-              } else if (c.characteristicId == rxCharUuid) {
                 _rx = QualifiedCharacteristic(
                   deviceId: device.id,
                   serviceId: serviceUuid,
                   characteristicId: rxCharUuid,
                 );
-              }
+
+                // Ask for a larger MTU (ESP32 negotiated to 517 per your logs)
+                try {
+                  final mtu = await _ble.requestMtu(
+                    deviceId: device.id,
+                    mtu: 247,
+                  );
+                  if (kDebugMode) print('MTU set to $mtu');
+                } catch (_) {}
+                break;
+
+              case DeviceConnectionState.disconnected:
+                _deviceId = null;
+                _deviceName = null;
+                _tx = null;
+                _rx = null;
+                break;
+
+              default:
+                break;
             }
-          }
-        }
-      } else if (update.connectionState ==
-          DeviceConnectionState.disconnected) {
-        _deviceId = null;
-        _deviceName = null;
-        _tx = null;
-        _rx = null;
-      }
-    });
+          },
+          onError: (e) {
+            if (kDebugMode) print('connect error: $e');
+            _deviceId = null;
+            _deviceName = null;
+            _tx = null;
+            _rx = null;
+          },
+        );
   }
 
   Future<void> disconnect() async {
@@ -129,14 +144,24 @@ class BleManager {
 
   // Notifications from ESP32 -> app
   Stream<List<int>> notifications() {
-    if (_tx == null) return const Stream.empty();
-    return _ble.subscribeToCharacteristic(_tx!);
+    final tx = _tx;
+    if (tx == null) return const Stream.empty();
+    return _ble.subscribeToCharacteristic(tx);
   }
 
-  // Write text to ESP32 (UTF8)
+  // Enable notifications (required for ESP32)
+  Future<void> enableNotifications() async {
+    final tx = _tx;
+    if (tx == null) throw StateError("Not connected");
+    await _ble.subscribeToCharacteristic(tx);
+  }
+
+  // Write text to ESP32 (UTF-8)
   Future<void> writeUtf8(String text) async {
-    if (_rx == null) throw StateError("Not connected");
+    final rx = _rx;
+    if (rx == null) throw StateError("Not connected");
     final data = Uint8List.fromList(text.codeUnits);
-    await _ble.writeCharacteristicWithoutResponse(_rx!, value: data);
+    // Use WithResponse for reliability while we debug
+    await _ble.writeCharacteristicWithResponse(rx, value: data);
   }
 }
