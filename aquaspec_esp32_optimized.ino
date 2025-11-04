@@ -91,7 +91,8 @@ void showReady();
 void showWifiStatus();
 void startAdvertising();
 void updateTankDisplay();
-static void notifyLine(const char* line);
+void fetchTanksFromSupabase();
+static void notifyLine(const String& line);
 static void notifyBytes(const uint8_t* data, size_t len);
 
 // =========================== Wi-Fi + Supabase ================================
@@ -111,21 +112,30 @@ static String DEVICE_UID = "esp32-UNSET";
 static String DEVICE_NAME = "";
 
 void wifiConnect() {
+  Serial.printf("wifiConnect() called. Current status: %d\n", WiFi.status());
+  
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
+    Serial.println("WiFi already connected");
     return;
   }
   if (WIFI_SSID.length() == 0) {
     wifiConnected = false;
+    Serial.println("No WiFi credentials available");
     return;
   }
   
+  Serial.printf("Connecting to WiFi: %s\n", WIFI_SSID.c_str());
+  Serial.printf("Password: %s\n", WIFI_PASS.c_str());
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID.c_str(), WIFI_PASS.c_str());
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
     delay(200);
     Serial.print(".");
+    if (millis() - t0 > 5000) {
+      Serial.printf("\nWiFi status: %d\n", WiFi.status());
+    }
   }
   
   wifiConnected = (WiFi.status() == WL_CONNECTED);
@@ -241,7 +251,16 @@ static void handleCommand(const std::string& cmd) {
     deviceProvisioned = true;
     notifyLine("WiFi and Supabase credentials received. Connecting...\n");
     
+    // Force disconnect WiFi and reset WiFi state
+    Serial.println("Disconnecting WiFi...");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(2000);
+    Serial.println("Resetting WiFi mode to STA...");
+    WiFi.mode(WIFI_STA);
+    
     // Connect to WiFi
+    Serial.println("Calling wifiConnect()...");
     wifiConnect();
     
     delay(200);
@@ -273,6 +292,20 @@ static void handleCommand(const std::string& cmd) {
     }
     
     notifyLine("Tank names set: " + String(tankCount) + "\n");
+    Serial.println("Tank names received:");
+    for (int i = 0; i < tankCount; i++) {
+      Serial.println("  " + String(i) + ": " + tankNames[i]);
+    }
+    
+    // Select first tank by default
+    if (tankCount > 0) {
+      selectedTankIndex = 0;
+      currentTankName = tankNames[0];
+      if (tankIds[0].length() > 0) {
+        currentTankId = tankIds[0];
+      }
+    }
+    
     updateTankDisplay();
     return;
   }
@@ -301,6 +334,16 @@ static void handleCommand(const std::string& cmd) {
     }
     
     notifyLine("Tank IDs set: " + String(count) + "\n");
+    Serial.println("Tank IDs received:");
+    for (int i = 0; i < count; i++) {
+      Serial.println("  " + String(i) + ": " + tankIds[i]);
+    }
+    
+    // Update current tank ID if we have tanks
+    if (tankCount > 0 && selectedTankIndex < count) {
+      currentTankId = tankIds[selectedTankIndex];
+    }
+    
     return;
   }
 
@@ -453,6 +496,19 @@ void setup() {
   // Connect to WiFi if provisioned
   if (deviceProvisioned) {
     wifiConnect();
+    // Wait a moment for WiFi connection to establish
+    delay(2000);
+    // Check WiFi status again after delay
+    wifiConnected = (WiFi.status() == WL_CONNECTED);
+    Serial.println("After delay - WiFi connected: " + String(wifiConnected));
+    
+    // Fetch tanks from Supabase after WiFi connection
+    if (wifiConnected) {
+      Serial.println("Calling fetchTanksFromSupabase() from setup()");
+      fetchTanksFromSupabase();
+    } else {
+      Serial.println("WiFi not connected, skipping tank fetch");
+    }
   }
 }
 
@@ -468,10 +524,28 @@ void startAdvertising() {
 
 void loop() {
   static unsigned long lastButtonPress = 0;
+  static unsigned long lastTankRefresh = 0;
   const unsigned long debounceDelay = 200;
+  const unsigned long tankRefreshInterval = 30000; // Refresh tanks every 30 seconds
 
-  if (!deviceConnected && !showedConnecting) {
+  // Only show "Connecting to Bluetooth" if WiFi is not connected
+  if (!deviceConnected && !wifiConnected && !showedConnecting) {
     showConnectingToBluetooth();
+  }
+
+  // If WiFi is connected, show tank display or WiFi status
+  if (wifiConnected) {
+    if (tankCount > 0) {
+      updateTankDisplay();
+    } else {
+      showWifiStatus();
+    }
+  }
+
+  // Periodically refresh tanks from Supabase if WiFi is connected
+  if (wifiConnected && millis() - lastTankRefresh > tankRefreshInterval) {
+    fetchTanksFromSupabase();
+    lastTankRefresh = millis();
   }
 
   if (millis() - lastButtonPress < debounceDelay) return;
@@ -482,6 +556,7 @@ void loop() {
       selectedTankIndex = (selectedTankIndex - 1 + tankCount) % tankCount;
       currentTankName = tankNames[selectedTankIndex];
       currentTankId = tankIds[selectedTankIndex];
+      Serial.println("UP button - selectedTankIndex: " + String(selectedTankIndex) + ", currentTankName: " + currentTankName);
       updateTankDisplay();
       lastButtonPress = millis();
     }
@@ -492,6 +567,7 @@ void loop() {
       selectedTankIndex = (selectedTankIndex + 1) % tankCount;
       currentTankName = tankNames[selectedTankIndex];
       currentTankId = tankIds[selectedTankIndex];
+      Serial.println("DOWN button - selectedTankIndex: " + String(selectedTankIndex) + ", currentTankName: " + currentTankName);
       updateTankDisplay();
       lastButtonPress = millis();
     }
@@ -538,18 +614,212 @@ void showWifiStatus() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(6, 8); display.print("WiFi: ");
-  display.print(wifiConnected ? "Connected" : "Disconnected");
-  display.setCursor(6, 20); display.print("Provisioned: ");
-  display.print(deviceProvisioned ? "Yes" : "No");
-  display.setCursor(6, 32); display.print("Tanks: ");
-  display.print(tankCount);
+  display.setCursor(0, 0); display.print("WiFi Connected");
+  display.setCursor(0, 12); display.print("IP: "); display.print(WiFi.localIP());
+  display.setCursor(0, 24); display.print("Fetching tanks...");
   display.display();
-  delay(2000);
-  updateTankDisplay();
+}
+
+void fetchTanksFromSupabase() {
+  if (!wifiConnected || SUPA_URL.length() == 0 || SUPA_ANON.length() == 0) {
+    Serial.println("Cannot fetch tanks: WiFi not connected or missing Supabase credentials");
+    return;
+  }
+  
+  Serial.println("Fetching tanks from Supabase...");
+  Serial.println("SUPA_URL: " + SUPA_URL);
+  Serial.println("SUPA_ANON: " + SUPA_ANON.substring(0, 20) + "...");
+  
+  WiFiClientSecure client;
+  client.setInsecure(); // NOTE: for demo; replace with proper CA / cert pinning for prod
+  
+  // Basic network info
+  Serial.println("WiFi Status: " + String(WiFi.status()));
+  Serial.println("WiFi Connected: " + String(wifiConnected));
+  Serial.println("IP Address: " + WiFi.localIP().toString());
+  
+  // Check if WiFi is actually connected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("ERROR: WiFi not connected! Status: " + String(WiFi.status()));
+    return;
+  }
+  
+  if (WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
+    Serial.println("ERROR: No IP address assigned!");
+    return;
+  }
+  
+  Serial.println("WiFi connection verified - proceeding with API call");
+  
+  // Test basic connectivity first with a simple HTTP request
+  Serial.println("Testing basic HTTP connectivity...");
+  WiFiClient testClient;
+  if (testClient.connect("httpbin.org", 80)) {
+    Serial.println("Basic HTTP connection works!");
+    testClient.stop();
+  } else {
+    Serial.println("Basic HTTP connection failed - network issue");
+    return;
+  }
+  
+  HTTPClient http;
+  String fullUrl = SUPA_URL + "/rest/v1/tanks?select=id,name&apikey=" + SUPA_ANON;
+  Serial.println("Full URL: " + fullUrl);
+  Serial.println("Attempting to fetch tanks from: " + fullUrl);
+  
+  // Check if URL ends with trailing slash
+  if (SUPA_URL.endsWith("/")) {
+    Serial.println("WARNING: SUPA_URL ends with trailing slash");
+  }
+  
+  // Also try a simpler query to test basic access
+  String testUrl = SUPA_URL + "/rest/v1/";
+  Serial.println("Test URL: " + testUrl);
+  
+  // Test basic Supabase access first
+  Serial.println("Testing basic Supabase access...");
+  http.end();
+  if (http.begin(client, testUrl)) {
+    http.addHeader("apikey", SUPA_ANON);
+    http.addHeader("Authorization", "Bearer " + SUPA_ANON);
+    http.addHeader("Accept", "application/json");
+    http.setTimeout(5000);
+    
+    int testCode = http.GET();
+    Serial.printf("Basic Supabase test returned code: %d\n", testCode);
+    if (testCode == HTTP_CODE_OK) {
+      String testResponse = http.getString();
+      Serial.println("Basic test response: " + testResponse);
+    } else {
+      String testError = http.getString();
+      Serial.println("Basic test error: " + testError);
+    }
+    http.end();
+  }
+  
+  // We know "tanks" table works, so go straight to fetching
+  
+  // Ensure we start fresh
+  http.end();
+  
+  if (!http.begin(client, fullUrl)) {
+    Serial.println("HTTP begin failed for tanks fetch");
+    return;
+  }
+  
+  // Simple setup - API key is in URL
+  http.setTimeout(10000); // 10 second timeout
+  
+  Serial.println("Making request to: " + fullUrl);
+  Serial.println("API key length: " + String(SUPA_ANON.length()));
+  
+  int code = http.GET();
+  Serial.printf("Tanks fetch response code: %d\n", code);
+  
+  if (code == HTTP_CODE_OK) {
+    String response = http.getString();
+    Serial.println("Tanks response: " + response);
+    Serial.println("Response length: " + String(response.length()) + " bytes");
+    
+    if (response.length() == 0) {
+      Serial.println("ERROR: Empty response from Supabase");
+      return;
+    }
+    
+    if (response.startsWith("{\"message\"")) {
+      Serial.println("ERROR: Supabase returned error message: " + response);
+      return;
+    }
+    
+    // Parse JSON response (simple parsing for tank names and IDs)
+    // Expected format: [{"id":"uuid","name":"Tank Name"},...]
+    tankCount = 0;
+    int start = 0;
+    
+    while (tankCount < 10) {
+      int nameStart = response.indexOf("\"name\":\"", start);
+      if (nameStart == -1) break;
+      
+      int nameEnd = response.indexOf("\"", nameStart + 8);
+      if (nameEnd == -1) break;
+      
+      int idStart = response.indexOf("\"id\":\"", start);
+      int idEnd = response.indexOf("\"", idStart + 6);
+      
+      if (idStart != -1 && idEnd != -1) {
+        tankNames[tankCount] = response.substring(nameStart + 8, nameEnd);
+        tankIds[tankCount] = response.substring(idStart + 6, idEnd);
+        tankCount++;
+      }
+      
+      start = nameEnd + 1;
+    }
+    
+    Serial.println("Parsed " + String(tankCount) + " tanks from Supabase");
+    for (int i = 0; i < tankCount; i++) {
+      Serial.println("  " + String(i) + ": " + tankNames[i] + " (ID: " + tankIds[i] + ")");
+    }
+    
+    // Select first tank
+    if (tankCount > 0) {
+      selectedTankIndex = 0;
+      currentTankName = tankNames[0];
+      currentTankId = tankIds[0];
+    }
+    
+    updateTankDisplay();
+  } else {
+    Serial.println("Failed to fetch tanks from Supabase");
+    Serial.printf("HTTP Error Code: %d\n", code);
+    String errorResponse = http.getString();
+    Serial.println("Error response: " + errorResponse);
+    Serial.printf("Error size: %d bytes\n", errorResponse.length());
+    
+    // Show specific error messages
+    if (code == -1) {
+      Serial.println("ERROR: Connection failed");
+    } else if (code == 401) {
+      Serial.println("ERROR: Unauthorized - check API key");
+    } else if (code == 403) {
+      Serial.println("ERROR: Forbidden - check permissions");
+    } else if (code == 404) {
+      Serial.println("ERROR: Not found - check table name 'tanks'");
+      Serial.println("Available tables might be: tank, tanks, aquarium_tanks, etc.");
+      
+      // Try alternative table names
+      Serial.println("Trying alternative table names...");
+      String altTables[] = {"tank", "aquarium_tanks", "tank_list", "tanks_list"};
+      for (int i = 0; i < 4; i++) {
+        String altUrl = SUPA_URL + "/rest/v1/" + altTables[i] + "?select=id,name";
+        Serial.println("Trying: " + altUrl);
+        
+        http.end();
+        if (http.begin(client, altUrl)) {
+          http.addHeader("apikey", SUPA_ANON);
+          http.addHeader("Authorization", "Bearer " + SUPA_ANON);
+          http.addHeader("Accept", "application/json");
+          http.setTimeout(5000);
+          
+          int altCode = http.GET();
+          Serial.printf("Alternative table '%s' returned code: %d\n", altTables[i].c_str(), altCode);
+          if (altCode == HTTP_CODE_OK) {
+            Serial.println("SUCCESS! Found working table: " + altTables[i]);
+            break;
+          }
+        }
+      }
+    } else if (code == 500) {
+      Serial.println("ERROR: Server error");
+    } else {
+      Serial.printf("ERROR: Unknown HTTP code %d\n", code);
+    }
+  }
+  
+  http.end();
 }
 
 void updateTankDisplay() {
+  Serial.println("updateTankDisplay() called - tankCount: " + String(tankCount) + ", selectedTankIndex: " + String(selectedTankIndex));
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -635,8 +905,8 @@ static void notifyBytes(const uint8_t* data, size_t len) {
   pTxChar->notify();
 }
 
-static void notifyLine(const char* line) {
-  notifyBytes((const uint8_t*)line, strlen(line));
+static void notifyLine(const String& line) {
+  notifyBytes((const uint8_t*)line.c_str(), line.length());
 }
 
 // Run the measurement, show on OLED, notify JSON, and POST to Supabase

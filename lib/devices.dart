@@ -139,6 +139,8 @@ class _DevicesPageState extends State<DevicesPage> {
                     style: TextStyle(color: Colors.white70, fontSize: 14),
                   ),
                   const SizedBox(height: 16),
+
+                  // WiFi Network Selection
                   TextField(
                     controller: ssidCtrl,
                     decoration: const InputDecoration(
@@ -244,8 +246,22 @@ class _DevicesPageState extends State<DevicesPage> {
                                     // PROVISION:SSID|PASS|DEVICE_UID|SUPABASE_URL|SUPABASE_KEY
                                     final cmd =
                                         'PROVISION:$ssid|$pass|$duid|$supabaseUrl|$supabaseKey\n';
+
+                                    // Debug: Print all values being sent
+                                    print('=== PROVISION DEBUG ===');
+                                    print('SSID: "$ssid"');
+                                    print('PASS: "$pass"');
+                                    print('DUID: "$duid"');
+                                    print('SUPABASE_URL: "$supabaseUrl"');
+                                    print(
+                                      'SUPABASE_KEY: "${supabaseKey.substring(0, 20)}..."',
+                                    );
+                                    print('FULL COMMAND: $cmd');
+                                    print('COMMAND LENGTH: ${cmd.length}');
+                                    print('=======================');
+
                                     try {
-                                      print('Sending PROVISION command: $cmd');
+                                      print('Sending PROVISION command...');
                                       await _ble.writeUtf8(cmd);
                                       print(
                                         'PROVISION command sent successfully',
