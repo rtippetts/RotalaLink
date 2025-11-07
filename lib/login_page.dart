@@ -81,11 +81,19 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  "RotalaLink",
-                  style: textTheme.displaySmall?.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w800,
+                // Square logo hero
+                SizedBox(
+                  width: 300,
+                  height: 300,
+                  child: Image.asset(
+                    'assets/brand/rotalafinalsquare2.png',
+                    fit: BoxFit.contain,
+                    semanticLabel: 'RotalaLink logo',
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.image_not_supported_outlined,
+                      size: 64,
+                      color: cs.onSurface.withOpacity(.5),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),

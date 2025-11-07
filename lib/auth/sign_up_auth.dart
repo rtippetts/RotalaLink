@@ -63,13 +63,12 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
     final displayName = "${widget.data.lastName.trim()}, ${widget.data.firstName.trim()}";
 
     try {
-      // Confirmation is ON; no session expected here.
       await client.auth.signUp(
         email: email,
         password: pass,
         data: {
           'display_name': displayName,
-          'phone': widget.data.phone,   // digits-only from phone step
+          'phone': widget.data.phone,
           'first_name': widget.data.firstName,
           'last_name': widget.data.lastName,
         },
@@ -83,7 +82,7 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('We emailed you a 6-digit code. Enter it to verify.')),
+        const SnackBar(content: Text('We emailed you a 6 digit code. Enter it to verify.')),
       );
     } on AuthException catch (e) {
       setState(() => _loading = false);
@@ -97,7 +96,7 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
   Future<void> _verifyCode({required String code}) async {
     final email = _email.text.trim();
     if (code.length < 6) {
-      _alert("Invalid code", "Enter the 6-digit code we sent to your email.");
+      _alert("Invalid code", "Enter the 6 digit code we sent to your email.");
       return;
     }
 
@@ -112,13 +111,13 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
         token: code,
       );
 
-      // 2) Sign in with password (creates session)
+      // 2) Sign in with password
       final signInRes = await client.auth.signInWithPassword(
         email: email,
         password: _password.text,
       );
       if (signInRes.user == null) {
-        throw Exception('Sign-in failed after verification.');
+        throw Exception('Sign in failed after verification.');
       }
 
       if (!mounted) return;
@@ -141,7 +140,7 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
     final client = Supabase.instance.client;
     try {
       await client.auth.resend(
-        type: OtpType.signup,          // resend for email confirmations
+        type: OtpType.signup,
         email: _email.text.trim(),
       );
       if (!mounted) return;
@@ -163,18 +162,25 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
     return Scaffold(
       backgroundColor: cs.background,
       appBar: AppBar(
-  title: const Text('Create account'),
-  centerTitle: true,
-  bottom: PreferredSize(
-    preferredSize: const Size.fromHeight(10),
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: StepBar(total: 4, current: 4), // ← set per screen
-    ),
-  ),
-),
+        centerTitle: true,
+        title: SizedBox(
+          height: 28,
+          child: Image.asset(
+            'assets/brand/rotalalink.png', // wordmark logo
+            fit: BoxFit.contain,
+            semanticLabel: 'RotalaLink',
+          ),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(10),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: StepBar(total: 4, current: 4),
+          ),
+        ),
+      ),
       body: Align(
-        alignment: const Alignment(0, -0.45), // move content toward upper middle
+        alignment: const Alignment(0, -0.45),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
@@ -183,10 +189,29 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      // Square logo hero
+                      Center(
+                        child: Hero(
+                          tag: 'brandHero',
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Image.asset(
+                              'assets/brand/rotalafinalsquare2.png',
+                              width: 300,
+                              height: 300,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
                       Text(
                         "Create Account",
+                        textAlign: TextAlign.center,
                         style: textTheme.displaySmall?.copyWith(
-                          color: cs.primary,
+                          color: const Color(0xFF51A7A8), // brand teal
+                          fontFamily: 'BrandSans',
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -206,7 +231,7 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Password (single field)
+                      // Password
                       TextField(
                         controller: _password,
                         obscureText: _obscure,
@@ -233,7 +258,8 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
                         child: FilledButton(
                           onPressed: _loading ? null : _startSignUp,
                           child: _loading
-                              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                              ? const SizedBox(
+                                  height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
                               : const Text("Sign Up"),
                         ),
                       ),
@@ -242,22 +268,44 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      // Square logo hero for continuity
+                      Center(
+                        child: Hero(
+                          tag: 'brandHero',
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Image.asset(
+                              'assets/brand/rotalafinalsquare2.png',
+                              width: 300,
+                              height: 300,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
                       Text(
                         "Check your email",
-                        style: textTheme.titleLarge?.copyWith(
+                        textAlign: TextAlign.center,
+                        style: textTheme.displaySmall?.copyWith(
                           color: cs.onSurface,
-                          fontWeight: FontWeight.w700,
+                          fontFamily: 'BrandSans',
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "Enter the 6-digit code we sent to ${_email.text.trim()} to verify your account.",
+                        "Enter the 6 digit code we sent to ${_email.text.trim()} to verify your account.",
                         textAlign: TextAlign.center,
-                        style: textTheme.bodyMedium?.copyWith(color: cs.onSurface.withOpacity(.75)),
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurface.withOpacity(.75),
+                          fontFamily: 'BrandSans',
+                        ),
                       ),
                       const SizedBox(height: 24),
 
-                      // 6-box OTP UI
+                      // 6 box OTP UI
                       OtpCode(
                         length: 6,
                         onChanged: (v) => _otpCollected = v,
@@ -271,7 +319,8 @@ class _SignUpAuthPageState extends State<SignUpAuthPage> {
                         child: FilledButton(
                           onPressed: _loading ? null : () => _verifyCode(code: _otpCollected),
                           child: _loading
-                              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                              ? const SizedBox(
+                                  height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
                               : const Text("Verify & Continue"),
                         ),
                       ),

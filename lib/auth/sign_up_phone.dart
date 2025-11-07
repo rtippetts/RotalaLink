@@ -1,3 +1,4 @@
+// lib/auth/sign_up_phone.dart
 import 'package:flutter/material.dart';
 import './sign_up_data.dart';
 import './sign_up_auth.dart';
@@ -15,7 +16,7 @@ class _SignUpPhonePageState extends State<SignUpPhonePage> {
   final _phoneCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
-  // A small, sane set. Add more as needed.
+  // Keep this small and focused; expand as needed.
   static const _codes = <String>[
     '+1',  // US/CA
     '+44', // UK
@@ -30,11 +31,19 @@ class _SignUpPhonePageState extends State<SignUpPhonePage> {
   @override
   void initState() {
     super.initState();
-    _countryCode = widget.data.countryCode;
+    // Default to prior value or +1
+    _countryCode = widget.data.countryCode.isNotEmpty ? widget.data.countryCode : '+1';
+    // If you previously captured a local phone, show it
+    if (widget.data.phoneLocal.isNotEmpty) {
+      _phoneCtrl.text = widget.data.phoneLocal;
+    }
   }
 
   @override
-  void dispose() { _phoneCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _phoneCtrl.dispose();
+    super.dispose();
+  }
 
   String _digitsOnly(String input) => input.replaceAll(RegExp(r'[^0-9]'), '');
 
@@ -46,49 +55,92 @@ class _SignUpPhonePageState extends State<SignUpPhonePage> {
     return Scaffold(
       backgroundColor: cs.background,
       appBar: AppBar(
-  title: const Text('Create account'),
-  centerTitle: true,
-  bottom: PreferredSize(
-    preferredSize: const Size.fromHeight(10),
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: StepBar(total: 4, current: 3), // ← set per screen
-    ),
-  ),
-),
+        centerTitle: true,
+        title: SizedBox(
+          height: 28,
+          child: Image.asset(
+            'assets/brand/rotalalink.png', // wordmark logo
+            fit: BoxFit.contain,
+            semanticLabel: 'RotalaLink',
+          ),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(10),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: StepBar(total: 4, current: 3),
+          ),
+        ),
+      ),
       body: Align(
-                  alignment: const Alignment(0, -0.45), // -1 = top, 0 = center
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 440),
+        alignment: const Alignment(0, -0.45), // keep higher in the viewport
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
             child: Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Brand square logo hero for visual consistency
+                  Center(
+                    child: Hero(
+                      tag: 'brandHero',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Image.asset(
+                          'assets/brand/rotalafinalsquare2.png',
+                          width: 300,
+                          height: 300,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
                   Text(
                     "Enter Phone Number",
                     textAlign: TextAlign.center,
-                    style: textTheme.displaySmall?.copyWith(color: cs.primary, fontWeight: FontWeight.w800),
+                    style: textTheme.displaySmall?.copyWith(
+                      color: const Color(0xFF51A7A8), // brand teal
+                      fontFamily: 'BrandSans',
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
+                  Text(
+                    "We will only use this for important alerts.",
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: Colors.white60,
+                      fontFamily: 'BrandSans',
+                    ),
+                  ),
+                  const SizedBox(height: 28),
 
-                  // Country code + free-form number
+                  // Country code + phone number
                   Row(
                     children: [
-                      // Country code dropdown
                       SizedBox(
                         width: 110,
                         child: DropdownButtonFormField<String>(
                           value: _countryCode,
+                          dropdownColor: const Color(0xFF0b1220),
                           decoration: const InputDecoration(labelText: 'Code'),
-                          items: _codes.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                          onChanged: (v) => setState(() => _countryCode = v ?? '+1'),
+                          items: _codes
+                              .map((c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c),
+                                  ))
+                              .toList(),
+                          onChanged: (v) => setState(() {
+                            _countryCode = v ?? '+1';
+                          }),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      // Free-form phone input
                       Expanded(
                         child: TextFormField(
                           controller: _phoneCtrl,
@@ -119,15 +171,17 @@ class _SignUpPhonePageState extends State<SignUpPhonePage> {
                         if (!(_formKey.currentState?.validate() ?? false)) return;
 
                         final localDigits = _digitsOnly(_phoneCtrl.text);
-                        final codeDigits  = _digitsOnly(_countryCode);
-                        // Save all pieces
+                        final codeDigits = _digitsOnly(_countryCode);
+
                         widget.data.countryCode = _countryCode;
-                        widget.data.phoneLocal  = localDigits;
-                        widget.data.phone       = '$codeDigits$localDigits'; // digits only
+                        widget.data.phoneLocal = localDigits;
+                        widget.data.phone = '$codeDigits$localDigits'; // digits only E.164-ish
 
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => SignUpAuthPage(data: widget.data)),
+                          MaterialPageRoute(
+                            builder: (_) => SignUpAuthPage(data: widget.data),
+                          ),
                         );
                       },
                       child: const Text("Continue"),
