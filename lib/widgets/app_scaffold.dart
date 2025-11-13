@@ -82,7 +82,7 @@ class _AppScaffoldState extends State<AppScaffold> {
         offset: const Offset(0, -4), // move up a few pixels
         child: Image.asset(
              'assets/brand/rotalanew2.png',
-        height: 65,
+        height: 60,
         fit: BoxFit.contain,
       ),
     ),

@@ -5,7 +5,11 @@ import '../tank_detail_page.dart';
 import 'quick_actions.dart';
 import 'tank_views.dart';
 
-// NEW imports
+// NEW
+import 'package:shared_preferences/shared_preferences.dart';
+import '../onboarding/walkthrough.dart';
+
+// NEW imports you already had
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -41,7 +45,6 @@ String _firstNameFromUser(User? user) {
 
   final email = user.email ?? '';
   if (email.contains('@')) return email.split('@').first;
-
   return '';
 }
 
@@ -69,9 +72,32 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _tankStream =
-        _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
+    _tankStream = _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
     _searchCtrl.addListener(() => setState(() {}));
+
+    // Show walkthrough once after first frame, if needed
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowWalkthrough());
+  }
+
+  Future<void> _maybeShowWalkthrough() async {
+    final seen = await WalkthroughScreen.hasSeen();
+    if (seen) return;
+
+    // Guard against showing on top of another route unexpectedly
+    if (!mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const WalkthroughScreen(),
+        fullscreenDialog: true,
+      ),
+    );
+
+    // If user dismissed by system back, still mark as seen to avoid reappearing
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool(kWalkthroughSeenKey) ?? false)) {
+      await WalkthroughScreen.markSeen();
+    }
   }
 
   @override
@@ -115,6 +141,7 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
                 const SizedBox(height: 16),
+
                 Expanded(
                   child: StreamBuilder<List<Map<String, dynamic>>>(
                     stream: _tankStream,
@@ -130,13 +157,13 @@ class _HomePageState extends State<HomePage> {
                           ),
                         );
                       }
+
                       final all = snap.data ?? const [];
                       final q = _searchCtrl.text.trim().toLowerCase();
                       final tanks = q.isEmpty
                           ? all
                           : all.where((row) {
-                              final name =
-                                  (row['name'] ?? '').toString().toLowerCase();
+                              final name = (row['name'] ?? '').toString().toLowerCase();
                               return name.contains(q);
                             }).toList();
 
@@ -163,8 +190,7 @@ class _HomePageState extends State<HomePage> {
                               : const PageScrollPhysics(),
                           itemCount: tanks.length,
                           itemBuilder: (_, i) => Padding(
-                            padding: EdgeInsets.only(
-                                bottom: i == tanks.length - 1 ? 0 : 12),
+                            padding: EdgeInsets.only(bottom: i == tanks.length - 1 ? 0 : 12),
                             child: TankCard(
                               row: tanks[i],
                               onOpen: _openTankDetail,
@@ -175,8 +201,7 @@ class _HomePageState extends State<HomePage> {
                         // compact list view
                         return ListView.separated(
                           itemCount: tanks.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
+                          separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (_, i) => TankListTile(
                             row: tanks[i],
                             onOpen: _openTankDetail,
@@ -185,8 +210,7 @@ class _HomePageState extends State<HomePage> {
                       } else {
                         // grid2: two side by side, vertical scroll
                         return GridView.builder(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
                             mainAxisSpacing: 12,
                             crossAxisSpacing: 12,
@@ -202,6 +226,7 @@ class _HomePageState extends State<HomePage> {
                     },
                   ),
                 ),
+
                 const SizedBox(height: 80),
               ],
             ),
@@ -250,8 +275,7 @@ class _HomePageState extends State<HomePage> {
           borderSide: BorderSide.none,
         ),
         isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
       ),
     );
   }
@@ -339,9 +363,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Text('Assistant',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
+                      color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               TextField(
                 controller: input,
@@ -401,10 +423,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Text(
                 'Alerts',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold),
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               Flexible(
@@ -414,9 +433,8 @@ class _HomePageState extends State<HomePage> {
                     if (snap.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     }
-                    final items = (snap.data ?? const [])
-                        .where((r) => r['user_id'] == uid)
-                        .toList();
+
+                    final items = (snap.data ?? const []).where((r) => r['user_id'] == uid).toList();
                     if (items.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.all(24),
@@ -426,23 +444,21 @@ class _HomePageState extends State<HomePage> {
                         ),
                       );
                     }
+
                     return ListView.separated(
                       shrinkWrap: true,
                       itemCount: items.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(color: Colors.white12),
+                      separatorBuilder: (_, __) => const Divider(color: Colors.white12),
                       itemBuilder: (_, i) {
                         final a = items[i];
                         final msg = a['message']?.toString() ?? 'Alert';
-                        final created = DateTime.tryParse(
-                                a['created_at']?.toString() ?? '') ??
-                            DateTime.now();
+                        final created =
+                            DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.notification_important,
-                              color: Colors.amber),
-                          title: Text(msg,
-                              style: const TextStyle(color: Colors.white)),
+                          leading:
+                              const Icon(Icons.notification_important, color: Colors.amber),
+                          title: Text(msg, style: const TextStyle(color: Colors.white)),
                           subtitle: Text(
                             _fmtDateShort(created),
                             style: const TextStyle(color: Colors.white70),
@@ -478,186 +494,167 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setStateSheet) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 16,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-              ),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Add Tank',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
+        return StatefulBuilder(builder: (ctx, setStateSheet) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            ),
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Add Tank',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
 
-                    // Name
-                    TextFormField(
-                      controller: nameCtrl,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        labelText: 'Name',
-                        labelStyle: TextStyle(color: Colors.white70),
+                  // Name
+                  TextFormField(
+                    controller: nameCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Name',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Water type
+                  DropdownButtonFormField<String>(
+                    value: waterType,
+                    dropdownColor: const Color(0xFF0b1220),
+                    items: const [
+                      DropdownMenuItem(value: 'freshwater', child: Text('Freshwater')),
+                      DropdownMenuItem(value: 'saltwater', child: Text('Saltwater')),
+                      DropdownMenuItem(value: 'brackish', child: Text('Brackish')),
+                    ],
+                    onChanged: (v) => waterType = v ?? 'freshwater',
+                    decoration: const InputDecoration(
+                      labelText: 'Water type',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Gallons
+                  TextFormField(
+                    controller: gallonsCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Volume (gallons)',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                    validator: (v) {
+                      final n = double.tryParse((v ?? '').trim());
+                      if (n == null || n <= 0) return 'Enter a number > 0';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Photo picker
+                  Row(
+                    children: [
+                      const Icon(Icons.photo_camera_back, color: Colors.white70),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text('Photo (optional)', style: TextStyle(color: Colors.white70)),
                       ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Water type
-                    DropdownButtonFormField<String>(
-                      value: waterType,
-                      dropdownColor: const Color(0xFF0b1220),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'freshwater', child: Text('Freshwater')),
-                        DropdownMenuItem(
-                            value: 'saltwater', child: Text('Saltwater')),
-                        DropdownMenuItem(
-                            value: 'brackish', child: Text('Brackish')),
-                      ],
-                      onChanged: (v) => waterType = v ?? 'freshwater',
-                      decoration: const InputDecoration(
-                        labelText: 'Water type',
-                        labelStyle: TextStyle(color: Colors.white70),
+                      TextButton.icon(
+                        onPressed: () => _pickFrom(ImageSource.gallery, setStateSheet),
+                        icon: const Icon(Icons.photo_library),
+                        label: const Text('Gallery'),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton.icon(
+                        onPressed: () => _pickFrom(ImageSource.camera, setStateSheet),
+                        icon: const Icon(Icons.photo_camera),
+                        label: const Text('Camera'),
+                      ),
+                    ],
+                  ),
+                  if (_pendingImageBytes != null) ...[
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.memory(
+                        _pendingImageBytes!,
+                        height: 120,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                  ],
 
-                    // Gallons
-                    TextFormField(
-                      controller: gallonsCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        labelText: 'Volume (gallons)',
-                        labelStyle: TextStyle(color: Colors.white70),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
                       ),
-                      validator: (v) {
-                        final n = double.tryParse((v ?? '').trim());
-                        if (n == null || n <= 0) return 'Enter a number > 0';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () async {
+                            if (!formKey.currentState!.validate()) return;
 
-                    // Photo picker
-                    Row(
-                      children: [
-                        const Icon(Icons.photo_camera_back,
-                            color: Colors.white70),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text('Photo (optional)',
-                              style: TextStyle(color: Colors.white70)),
-                        ),
-                        TextButton.icon(
-                          onPressed: () =>
-                              _pickFrom(ImageSource.gallery, setStateSheet),
-                          icon: const Icon(Icons.photo_library),
-                          label: const Text('Gallery'),
-                        ),
-                        const SizedBox(width: 6),
-                        TextButton.icon(
-                          onPressed: () =>
-                              _pickFrom(ImageSource.camera, setStateSheet),
-                          icon: const Icon(Icons.photo_camera),
-                          label: const Text('Camera'),
-                        ),
-                      ],
-                    ),
-                    if (_pendingImageBytes != null) ...[
-                      const SizedBox(height: 8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.memory(
-                          _pendingImageBytes!,
-                          height: 120,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Saving...'), duration: Duration(seconds: 1)),
+                            );
+
+                            try {
+                              final uid = _supa.auth.currentUser!.id;
+                              String? imageUrl;
+                              if (_pendingImageBytes != null) {
+                                imageUrl = await _uploadTankImage(_pendingImageBytes!);
+                              }
+
+                              await _supa.from('tanks').insert({
+                                'user_id': uid,
+                                'name': nameCtrl.text.trim(),
+                                'water_type': waterType,
+                                'volume_gallons': double.parse(gallonsCtrl.text.trim()),
+                                if (imageUrl != null) 'image_url': imageUrl,
+                              });
+
+                              if (mounted) {
+                                Navigator.pop(ctx, true);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Tank added')),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed: $e'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: const Text('Save'),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 16),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () async {
-                              if (!formKey.currentState!.validate()) return;
-
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Saving...'),
-                                    duration: Duration(seconds: 1)),
-                              );
-
-                              try {
-                                final uid = _supa.auth.currentUser!.id;
-
-                                String? imageUrl;
-                                if (_pendingImageBytes != null) {
-                                  imageUrl = await _uploadTankImage(
-                                      _pendingImageBytes!);
-                                }
-
-                                await _supa.from('tanks').insert({
-                                  'user_id': uid,
-                                  'name': nameCtrl.text.trim(),
-                                  'water_type': waterType,
-                                  'volume_gallons':
-                                      double.parse(gallonsCtrl.text.trim()),
-                                  if (imageUrl != null) 'image_url': imageUrl,
-                                });
-
-                                if (mounted) {
-                                  Navigator.pop(ctx, true);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Tank added')),
-                                  );
-                                }
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Failed: $e'),
-                                      backgroundColor: Colors.redAccent,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                            child: const Text('Save'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        );
+            ),
+          );
+        });
       },
     );
 
@@ -669,8 +666,7 @@ class _HomePageState extends State<HomePage> {
   // Manual entry bottom sheet
   Future<void> _openManualEntrySheet() async {
     try {
-      final tanks =
-          await _supa.from('tanks').select('id,name').order('created_at');
+      final tanks = await _supa.from('tanks').select('id,name').order('created_at');
       if (!mounted) return;
 
       String? tankId = tanks.isNotEmpty ? tanks.first['id'] as String : null;
@@ -699,10 +695,7 @@ class _HomePageState extends State<HomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Add reading',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: tankId,
@@ -723,24 +716,20 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: phCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: 'pH'),
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: tdsCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: 'TDS ppm'),
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: tempCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration:
-                        const InputDecoration(labelText: 'Temperature °C'),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Temperature °C'),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -755,25 +744,23 @@ class _HomePageState extends State<HomePage> {
                                   if (phCtrl.text.trim().isNotEmpty)
                                     'ph': double.tryParse(phCtrl.text.trim()),
                                   if (tdsCtrl.text.trim().isNotEmpty)
-                                    'tds':
-                                        double.tryParse(tdsCtrl.text.trim()),
+                                    'tds': double.tryParse(tdsCtrl.text.trim()),
                                   if (tempCtrl.text.trim().isNotEmpty)
-                                    'temperature_c':
-                                        double.tryParse(tempCtrl.text.trim()),
+                                    'temperature_c': double.tryParse(tempCtrl.text.trim()),
                                 });
                                 if (mounted) Navigator.pop(ctx);
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text('Reading added')),
+                                    const SnackBar(content: Text('Reading added')),
                                   );
                                 }
                               } catch (e) {
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                        content: Text('Failed: $e'),
-                                        backgroundColor: Colors.redAccent),
+                                      content: Text('Failed: $e'),
+                                      backgroundColor: Colors.redAccent,
+                                    ),
                                   );
                                 }
                               }
@@ -789,15 +776,13 @@ class _HomePageState extends State<HomePage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open manual entry: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open manual entry: $e')));
     }
   }
 
   // Image helpers
-  Future<void> _pickFrom(
-      ImageSource source, void Function(void Function()) setStateSheet) async {
+  Future<void> _pickFrom(ImageSource source, void Function(void Function()) setStateSheet) async {
     try {
       final xfile = await _picker.pickImage(
         source: source,
@@ -805,14 +790,13 @@ class _HomePageState extends State<HomePage> {
         imageQuality: 85,
       );
       if (xfile == null) return;
+
       _pendingImageBytes = await xfile.readAsBytes();
       _pendingImageName = xfile.name;
       setStateSheet(() {});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Image error: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Image error: $e')));
     }
   }
 
@@ -824,17 +808,16 @@ class _HomePageState extends State<HomePage> {
     final path = '$uid/tanks/$id.jpg';
 
     await _supa.storage.from('tank-images').uploadBinary(
-      path,
-      bytes,
-      fileOptions: const FileOptions(
-        contentType: 'image/jpeg',
-        upsert: false,
-      ),
-    );
+          path,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: false,
+          ),
+        );
 
-    final signed = await _supa.storage
-        .from('tank-images')
-        .createSignedUrl(path, 60 * 60 * 24 * 30);
+    final signed =
+        await _supa.storage.from('tank-images').createSignedUrl(path, 60 * 60 * 24 * 30);
     return signed;
   }
 
