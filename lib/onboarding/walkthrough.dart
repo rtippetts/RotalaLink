@@ -8,35 +8,26 @@ class WalkthroughScreen extends StatefulWidget {
   const WalkthroughScreen({super.key});
 
   static Future<void> markSeen() async {
+    // You can keep this if you still want to track that they saw it,
+    // but it no longer controls whether it shows or not.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kWalkthroughSeenKey, true);
 
-    // Optional: persist per user so it never shows on other devices once seen
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
       try {
         final md = Map<String, dynamic>.from(user.userMetadata ?? {});
         if (md['walkthrough_seen'] != true) {
           md['walkthrough_seen'] = true;
-          await Supabase.instance.client.auth.updateUser(UserAttributes(data: md));
+          await Supabase.instance.client.auth
+              .updateUser(UserAttributes(data: md));
         }
       } catch (_) {}
     }
   }
 
+  // Always return false so the app always shows the walkthrough
   static Future<bool> hasSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    final local = prefs.getBool(kWalkthroughSeenKey) ?? false;
-
-    if (local) return true;
-
-    // If signed in and metadata says seen, sync local flag and honor it
-    final user = Supabase.instance.client.auth.currentUser;
-    final remote = user?.userMetadata?['walkthrough_seen'] == true;
-    if (remote) {
-      await prefs.setBool(kWalkthroughSeenKey, true);
-      return true;
-    }
     return false;
   }
 
@@ -88,7 +79,10 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
         actions: [
           TextButton(
             onPressed: _finish,
-            child: const Text('Skip', style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'Skip',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -107,7 +101,8 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
             _Dots(count: _pages.length, index: _index),
             const SizedBox(height: 12),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
                 children: [
                   Expanded(
@@ -123,7 +118,8 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
                           ? _finish
                           : () {
                               _controller.nextPage(
-                                duration: const Duration(milliseconds: 250),
+                                duration:
+                                    const Duration(milliseconds: 250),
                                 curve: Curves.easeOut,
                               );
                             },
@@ -142,7 +138,11 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
 }
 
 class _WTPage extends StatelessWidget {
-  const _WTPage({required this.icon, required this.title, required this.body});
+  const _WTPage({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
 
   final IconData icon;
   final String title;
@@ -170,7 +170,10 @@ class _WTPage extends StatelessWidget {
           Text(
             body,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 15),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 15,
+            ),
           ),
         ],
       ),
@@ -180,6 +183,7 @@ class _WTPage extends StatelessWidget {
 
 class _Dots extends StatelessWidget {
   const _Dots({required this.count, required this.index});
+
   final int count;
   final int index;
 

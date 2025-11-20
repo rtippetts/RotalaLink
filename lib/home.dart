@@ -4,15 +4,14 @@ import '../widgets/app_scaffold.dart';
 import '../tank_detail_page.dart';
 import 'quick_actions.dart';
 import 'tank_views.dart';
-
-// NEW
 import 'package:shared_preferences/shared_preferences.dart';
 import '../onboarding/walkthrough.dart';
-
-// NEW imports you already had
+import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+
+
 
 final _supa = Supabase.instance.client;
 
@@ -227,34 +226,37 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
 
-                const SizedBox(height: 80),
+                const SizedBox(height: 30),
               ],
             ),
           ),
 
-          // Bottom right: clearer New tank FAB
-          Positioned(
-            right: 16,
-            bottom: 16 + 56,
-            child: FloatingActionButton.extended(
-              backgroundColor: const Color(0xFF06b6d4),
-              onPressed: _openAddTankSheet,
-              icon: const Icon(Icons.water_drop),
-              label: const Text('New tank'),
-            ),
-          ),
-
-          // Bottom left: chatbot FAB
-          Positioned(
-            left: 16,
-            bottom: 16 + 56,
-            child: FloatingActionButton(
-              heroTag: 'assistantFab',
-              onPressed: _openAssistantSheet,
-              backgroundColor: const Color(0xFF1f2937),
-              child: const Icon(Icons.smart_toy, color: Colors.white),
-            ),
-          ),
+Positioned(
+  right: 16,
+  bottom: 16 + 56,
+  child: FloatingActionButton.extended(
+    backgroundColor: const Color(0xFF06b6d4),
+    onPressed: _openAddTankSheet,
+    icon: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.add,
+          size: 20,
+          color: Colors.white,
+        ),
+        const SizedBox(width: 5),
+        Icon(
+          MdiIcons.fishbowlOutline, // not const
+          size: 30,
+          color: Colors.white,
+        ),
+      ],
+    ),
+    label: const SizedBox.shrink(),
+    extendedPadding: const EdgeInsets.symmetric(horizontal: 10),
+  ),
+),
         ],
       ),
     );
@@ -340,7 +342,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // Assistant sheet placeholder
+  // This now only used if you call it elsewhere. Left in case you still want the assistant.
   Future<void> _openAssistantSheet() async {
     final input = TextEditingController();
     await showModalBottomSheet<void>(
@@ -361,9 +363,14 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Assistant',
-                  style: TextStyle(
-                      color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text(
+                'Assistant',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: input,
@@ -420,10 +427,24 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 'Alerts',
-                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Alert center preview. Automatic alerts and custom rules will roll out in a future update.',
+                style: TextStyle(
+                  color: Colors.white60,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
               const SizedBox(height: 12),
               Flexible(
@@ -434,7 +455,10 @@ class _HomePageState extends State<HomePage> {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    final items = (snap.data ?? const []).where((r) => r['user_id'] == uid).toList();
+                    final items = (snap.data ?? const [])
+                        .where((r) => r['user_id'] == uid)
+                        .toList();
+
                     if (items.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.all(24),
@@ -448,17 +472,25 @@ class _HomePageState extends State<HomePage> {
                     return ListView.separated(
                       shrinkWrap: true,
                       itemCount: items.length,
-                      separatorBuilder: (_, __) => const Divider(color: Colors.white12),
+                      separatorBuilder: (_, __) =>
+                          const Divider(color: Colors.white12),
                       itemBuilder: (_, i) {
                         final a = items[i];
                         final msg = a['message']?.toString() ?? 'Alert';
                         final created =
-                            DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
+                            DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+                                DateTime.now();
+
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading:
-                              const Icon(Icons.notification_important, color: Colors.amber),
-                          title: Text(msg, style: const TextStyle(color: Colors.white)),
+                          leading: const Icon(
+                            Icons.notification_important,
+                            color: Colors.amber,
+                          ),
+                          title: Text(
+                            msg,
+                            style: const TextStyle(color: Colors.white),
+                          ),
                           subtitle: Text(
                             _fmtDateShort(created),
                             style: const TextStyle(color: Colors.white70),
@@ -819,6 +851,16 @@ class _HomePageState extends State<HomePage> {
     final signed =
         await _supa.storage.from('tank-images').createSignedUrl(path, 60 * 60 * 24 * 30);
     return signed;
+  }
+
+  // Export CSV placeholder
+  void _exportCsvComingSoon() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('CSV export is coming in a future update'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   // Helpers

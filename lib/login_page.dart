@@ -60,7 +60,10 @@ class _LoginPageState extends State<LoginPage> {
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
         ],
       ),
     );
@@ -69,7 +72,6 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       backgroundColor: cs.background,
@@ -102,7 +104,10 @@ class _LoginPageState extends State<LoginPage> {
                 TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
-                  autofillHints: const [AutofillHints.username, AutofillHints.email],
+                  autofillHints: const [
+                    AutofillHints.username,
+                    AutofillHints.email,
+                  ],
                   decoration: const InputDecoration(
                     labelText: "Email",
                     prefixIcon: Icon(Icons.email_outlined),
@@ -120,8 +125,12 @@ class _LoginPageState extends State<LoginPage> {
                     labelText: "Password",
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      onPressed: _loading ? null : () => setState(() => _obscure = !_obscure),
-                      icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                      onPressed: _loading
+                          ? null
+                          : () => setState(() => _obscure = !_obscure),
+                      icon: Icon(
+                        _obscure ? Icons.visibility_off : Icons.visibility,
+                      ),
                       tooltip: _obscure ? "Show password" : "Hide password",
                     ),
                   ),
@@ -138,7 +147,9 @@ class _LoginPageState extends State<LoginPage> {
                         : () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
+                              MaterialPageRoute(
+                                builder: (_) => const ForgotPasswordPage(),
+                              ),
                             );
                           },
                     child: const Text("Forgot password?"),
@@ -160,7 +171,10 @@ class _LoginPageState extends State<LoginPage> {
                           )
                         : const Text(
                             "Log In",
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                   ),
                 ),
@@ -172,7 +186,10 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     Text(
                       "Do not have an account?",
-                      style: TextStyle(color: cs.onSurface.withOpacity(.7), fontSize: 14),
+                      style: TextStyle(
+                        color: cs.onSurface.withOpacity(.7),
+                        fontSize: 14,
+                      ),
                     ),
                     TextButton(
                       onPressed: _loading
@@ -180,12 +197,18 @@ class _LoginPageState extends State<LoginPage> {
                           : () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const SignUpFirstNamePage()),
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const SignUpFirstNamePage(),
+                                ),
                               );
                             },
                       child: const Text(
                         "Sign Up",
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   ],

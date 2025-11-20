@@ -2,10 +2,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+
 import 'ble/ble_manager.dart';
+import 'widgets/app_scaffold.dart';
 
 class DevicePage extends StatefulWidget {
   const DevicePage({super.key});
+
   @override
   State<DevicePage> createState() => _DevicePageState();
 }
@@ -20,25 +23,40 @@ class _DevicePageState extends State<DevicePage> {
 
   Future<void> _connectTap() async {
     if (_ble.isConnected || _busy) return;
-    setState(() { _busy = true; _status = 'Requesting permissions…'; });
+
+    setState(() {
+      _busy = true;
+      _status = 'Requesting permissions…';
+    });
 
     final ok = await _ble.ensurePermissions();
     if (!ok) {
-      setState(() { _busy = false; _status = 'Bluetooth permission denied'; });
+      setState(() {
+        _busy = false;
+        _status = 'Bluetooth permission denied';
+      });
       return;
     }
 
     setState(() => _status = 'Scanning…');
-    _scan?.cancel();
+
+    await _scan?.cancel();
     _scan = _ble.startScan().listen((d) async {
-      // Got a device advertising our service: stop scan and connect
       await _ble.stopScan();
-      setState(() => _status = 'Connecting to ${d.name.isEmpty ? d.id : d.name}…');
+
+      setState(() {
+        _status = 'Connecting to ${d.name.isEmpty ? d.id : d.name}…';
+      });
+
       await _ble.connect(d);
 
       if (_ble.isConnected) {
-        setState(() { _busy = false; _status = 'Device connected'; });
-        _notif?.cancel();
+        setState(() {
+          _busy = false;
+          _status = 'Device connected';
+        });
+
+        await _notif?.cancel();
         _notif = _ble.notifications().listen((bytes) {
           final text = String.fromCharCodes(bytes);
           if (mounted) {
@@ -48,10 +66,16 @@ class _DevicePageState extends State<DevicePage> {
           }
         });
       } else {
-        setState(() { _busy = false; _status = 'Failed to connect'; });
+        setState(() {
+          _busy = false;
+          _status = 'Failed to connect';
+        });
       }
     }, onError: (e) {
-      setState(() { _busy = false; _status = 'Scan error: $e'; });
+      setState(() {
+        _busy = false;
+        _status = 'Scan error: $e';
+      });
     });
   }
 
@@ -59,7 +83,11 @@ class _DevicePageState extends State<DevicePage> {
     await _ble.disconnect();
     await _scan?.cancel();
     await _notif?.cancel();
-    setState(() { _status = 'Disconnected'; _busy = false; });
+    if (!mounted) return;
+    setState(() {
+      _status = 'Disconnected';
+      _busy = false;
+    });
   }
 
   @override
@@ -72,29 +100,23 @@ class _DevicePageState extends State<DevicePage> {
   Widget build(BuildContext context) {
     final connected = _ble.isConnected;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF111827),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF111827),
-        title: const Text('Device'),
-        actions: [
-          if (connected)
-            IconButton(
-              icon: const Icon(Icons.link_off),
-              onPressed: _disconnect,
-              tooltip: 'Disconnect',
-            ),
-        ],
-      ),
+    return AppScaffold(
+      currentIndex: 1, // Devices tab
+      title: 'Device',
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_busy) const Padding(
-              padding: EdgeInsets.only(bottom: 16),
-              child: CircularProgressIndicator(),
+            if (_busy)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 16),
+                child: CircularProgressIndicator(),
+              ),
+            Text(
+              _status,
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
             ),
-            Text(_status, style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: connected ? null : _connectTap,
@@ -102,7 +124,15 @@ class _DevicePageState extends State<DevicePage> {
             ),
             if (connected) ...[
               const SizedBox(height: 8),
-              const Text('Connected ✔', style: TextStyle(color: Colors.greenAccent)),
+              const Text(
+                'Connected ✔',
+                style: TextStyle(color: Colors.greenAccent),
+              ),
+              const SizedBox(height: 4),
+              TextButton(
+                onPressed: _disconnect,
+                child: const Text('Disconnect'),
+              ),
             ],
           ],
         ),
