@@ -10,6 +10,8 @@ import 'package:material_design_icons_flutter/material_design_icons_flutter.dart
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
+import 'theme/rotala_brand.dart';
+import 'app_settings.dart';
 
 
 
@@ -59,7 +61,7 @@ enum LayoutMode { grid2, list, cards }
 class _HomePageState extends State<HomePage> {
   late final Stream<List<Map<String, dynamic>>> _tankStream;
 
-  // picker + in sheet image state
+  // picker plus in sheet image state
   final _picker = ImagePicker();
   Uint8List? _pendingImageBytes;
   String? _pendingImageName;
@@ -68,41 +70,383 @@ class _HomePageState extends State<HomePage> {
   final TextEditingController _searchCtrl = TextEditingController();
   LayoutMode _layout = LayoutMode.grid2; // default to two column view
 
+  // global tasks state
+  final List<_GlobalTask> _globalTasks = [];
+  bool _loadingGlobalTasks = false;
+
   @override
   void initState() {
     super.initState();
-    _tankStream = _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
+    _tankStream =
+        _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
     _searchCtrl.addListener(() => setState(() {}));
 
+    // Load persisted unit settings (F vs C, gallons vs liters)
+    AppSettings.load();
+
     // Show walkthrough once after first frame, if needed
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowWalkthrough());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _maybeShowWalkthrough());
+  }
+
+
+  Future<void> _openAddTaskSheet() async {
+    final uid = _supa.auth.currentUser?.id;
+    if (uid == null) return;
+
+    final tanks =
+        await _supa.from('tanks').select('id,name').order('created_at');
+
+    String? selectedTankId;
+    final titleCtrl = TextEditingController();
+    DateTime? dueDate;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1f2937),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Add Task',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Title
+                  TextField(
+                    controller: titleCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Task title',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Tank selector (nullable)
+                  DropdownButtonFormField<String?>(
+                    value: selectedTankId,
+                    dropdownColor: const Color(0xFF1f2937),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('General task'),
+                      ),
+                      for (final t in tanks)
+                        DropdownMenuItem<String?>(
+                          value: t['id'] as String,
+                          child: Text(t['name'] ?? 'Tank'),
+                        )
+                    ],
+                    onChanged: (v) => setSheet(() => selectedTankId = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Attach to tank',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Choose due date
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          dueDate == null
+                              ? 'No due date'
+                              : 'Due: ${dueDate!.year}/${dueDate!.month.toString().padLeft(2, '0')}/${dueDate!.day.toString().padLeft(2, '0')}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: DateTime.now(),
+                            firstDate: DateTime(2024),
+                            lastDate: DateTime(2030),
+                            builder: (context, child) {
+                              return Theme(
+                                data: ThemeData.dark(),
+                                child: child!,
+                              );
+                            },
+                          );
+                          if (picked != null) {
+                            setSheet(() => dueDate = picked);
+                          }
+                        },
+                        child: const Text('Pick date'),
+                      )
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  FilledButton(
+                    onPressed: () async {
+                      if (titleCtrl.text.trim().isEmpty) return;
+
+                      await _supa.from('tank_tasks').insert({
+                        'user_id': uid,
+                        'title': titleCtrl.text.trim(),
+                        'tank_id': selectedTankId, // nullable
+                        'done': false,
+                        if (dueDate != null)
+                          'due_at': dueDate!.toIso8601String(),
+                      });
+
+                      if (context.mounted) Navigator.pop(ctx);
+                    },
+                    child: const Text('Save'),
+                  )
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _maybeShowWalkthrough() async {
-    final seen = await WalkthroughScreen.hasSeen();
-    if (seen) return;
+  final seen = await WalkthroughScreen.hasSeen();
+  if (seen || !mounted) return;
 
-    // Guard against showing on top of another route unexpectedly
-    if (!mounted) return;
+  // First time for this user, show the walkthrough
+  await WalkthroughScreen.show(context);
 
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const WalkthroughScreen(),
-        fullscreenDialog: true,
-      ),
-    );
-
-    // If user dismissed by system back, still mark as seen to avoid reappearing
-    final prefs = await SharedPreferences.getInstance();
-    if (!(prefs.getBool(kWalkthroughSeenKey) ?? false)) {
-      await WalkthroughScreen.markSeen();
-    }
+  // If user exited with system back and markSeen was not called,
+  // force mark it so it does not auto show again
+  final prefs = await SharedPreferences.getInstance();
+  if (!(prefs.getBool(kWalkthroughSeenKey) ?? false)) {
+    await WalkthroughScreen.markSeen();
   }
+}
+
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  // format with date and time for global tasks
+  String _timeExactGlobal(DateTime t) {
+    final date =
+        '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+    final time =
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    return '$date • $time';
+  }
+
+  // load all tasks for the signed in user
+  Future<void> _loadGlobalTasks() async {
+    final uid = _supa.auth.currentUser?.id;
+
+    if (uid == null) {
+      setState(() {
+        _globalTasks.clear();
+        _loadingGlobalTasks = false;
+      });
+      return;
+    }
+
+    setState(() => _loadingGlobalTasks = true);
+
+    try {
+      final rows = await _supa
+          .from('tank_tasks')
+          .select('id, title, done, due_at, created_at, tank_id')
+          .eq('user_id', uid)
+          .order('created_at', ascending: false);
+
+      final list = (rows as List)
+          .map(
+            (r) => _GlobalTask(
+              id: r['id'] as String,
+              title: (r['title'] ?? '') as String,
+              done: r['done'] == true,
+              due: r['due_at'] == null
+                  ? null
+                  : DateTime.parse(r['due_at']).toLocal(),
+              tankId: r['tank_id'] as String?,
+            ),
+          )
+          .toList();
+
+      setState(() {
+        _globalTasks
+          ..clear()
+          ..addAll(list);
+        _loadingGlobalTasks = false;
+      });
+    } catch (_) {
+      setState(() => _loadingGlobalTasks = false);
+    }
+  }
+
+  Future<void> _createOrEditGlobalTask({_GlobalTask? existing}) async {
+    final uid = _supa.auth.currentUser?.id;
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to manage tasks')),
+      );
+      return;
+    }
+
+    final title = TextEditingController(text: existing?.title ?? '');
+    DateTime? due = existing?.due;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1f2937),
+            title: Text(
+              existing == null ? 'Add Task' : 'Edit Task',
+              style: const TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: title,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    labelStyle: TextStyle(color: Colors.white70),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.tealAccent),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      const Icon(Icons.edit_calendar, color: Colors.white70),
+                  title: Text(
+                    due == null
+                        ? 'No due date'
+                        : 'Due: ${_timeExactGlobal(due!)}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () async {
+                    final now = DateTime.now();
+                    final d = await showDatePicker(
+                      context: ctx,
+                      initialDate: due ?? now,
+                      firstDate: now.subtract(const Duration(days: 3650)),
+                      lastDate: now.add(const Duration(days: 3650)),
+                    );
+                    if (d == null) return;
+                    final t = await showTimePicker(
+                      context: ctx,
+                      initialTime: TimeOfDay.fromDateTime(due ?? now),
+                    );
+                    setSheet(
+                      () => due = DateTime(
+                        d.year,
+                        d.month,
+                        d.day,
+                        t?.hour ?? 0,
+                        t?.minute ?? 0,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (saved != true) return;
+
+    if (title.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Title cannot be empty')),
+      );
+      return;
+    }
+
+    if (existing == null) {
+      // New task defaults to a general task
+      await _supa.from('tank_tasks').insert({
+        'user_id': uid,
+        'tank_id': null,
+        'title': title.text.trim(),
+        'done': false,
+        'due_at': due?.toUtc().toIso8601String(),
+      });
+    } else {
+      await _supa.from('tank_tasks').update({
+        'title': title.text.trim(),
+        'due_at': due?.toUtc().toIso8601String(),
+      }).eq('id', existing.id);
+    }
+
+    await _loadGlobalTasks();
+  }
+
+  Future<void> _deleteGlobalTask(_GlobalTask t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete task?'),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    await _supa.from('tank_tasks').delete().eq('id', t.id);
+    await _loadGlobalTasks();
   }
 
   @override
@@ -125,7 +469,7 @@ class _HomePageState extends State<HomePage> {
                 // Quick Actions card with greeting
                 QuickActionsCard(
                   tankStream: _tankStream,
-                  onOpenAlerts: _openAlertsSheet,
+                  onOpenTasks: _openTasksSheet,
                   onAddReading: _openManualEntrySheet,
                   greetingName: firstName,
                 ),
@@ -141,122 +485,141 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(height: 16),
 
+                                // Rebuild tank views when the temperature unit changes
                 Expanded(
-                  child: StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: _tankStream,
-                    builder: (context, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snap.hasError) {
-                        return Center(
-                          child: Text(
-                            'Error loading tanks: ${snap.error}',
-                            style: const TextStyle(color: Colors.redAccent),
-                          ),
-                        );
-                      }
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: AppSettings.useFahrenheit,
+                    builder: (context, useFahrenheit, _) {
+                      return StreamBuilder<List<Map<String, dynamic>>>(
+                        stream: _tankStream,
+                        builder: (context, snap) {
+                          if (snap.connectionState == ConnectionState.waiting) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+                          if (snap.hasError) {
+                            return Center(
+                              child: Text(
+                                'Error loading tanks: ${snap.error}',
+                                style: const TextStyle(color: Colors.redAccent),
+                              ),
+                            );
+                          }
 
-                      final all = snap.data ?? const [];
-                      final q = _searchCtrl.text.trim().toLowerCase();
-                      final tanks = q.isEmpty
-                          ? all
-                          : all.where((row) {
-                              final name = (row['name'] ?? '').toString().toLowerCase();
-                              return name.contains(q);
-                            }).toList();
+                          final all = snap.data ?? const [];
+                          final q = _searchCtrl.text.trim().toLowerCase();
+                          final tanks = q.isEmpty
+                              ? all
+                              : all.where((row) {
+                                  final name = (row['name'] ?? '')
+                                      .toString()
+                                      .toLowerCase();
+                                  return name.contains(q);
+                                }).toList();
 
-                      if (tanks.isEmpty) {
-                        return Center(
-                          child: TextButton.icon(
-                            onPressed: _openAddTankSheet,
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            label: const Text(
-                              'Add your first tank',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        );
-                      }
+                          if (tanks.isEmpty) {
+                            return Center(
+                              child: TextButton.icon(
+                                onPressed: _openAddTankSheet,
+                                icon: const Icon(Icons.add, color: Colors.white),
+                                label: const Text(
+                                  'Add your first tank',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            );
+                          }
 
-                      if (_layout == LayoutMode.cards) {
-                        // Full height cards
-                        return PageView.builder(
-                          scrollDirection: Axis.vertical,
-                          controller: PageController(viewportFraction: 1.0),
-                          physics: tanks.length == 1
-                              ? const NeverScrollableScrollPhysics()
-                              : const PageScrollPhysics(),
-                          itemCount: tanks.length,
-                          itemBuilder: (_, i) => Padding(
-                            padding: EdgeInsets.only(bottom: i == tanks.length - 1 ? 0 : 12),
-                            child: TankCard(
-                              row: tanks[i],
-                              onOpen: _openTankDetail,
-                            ),
-                          ),
-                        );
-                      } else if (_layout == LayoutMode.list) {
-                        // compact list view
-                        return ListView.separated(
-                          itemCount: tanks.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (_, i) => TankListTile(
-                            row: tanks[i],
-                            onOpen: _openTankDetail,
-                          ),
-                        );
-                      } else {
-                        // grid2: two side by side, vertical scroll
-                        return GridView.builder(
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 12,
-                            childAspectRatio: 0.78,
-                          ),
-                          itemCount: tanks.length,
-                          itemBuilder: (_, i) => TankGridCard(
-                            row: tanks[i],
-                            onOpen: _openTankDetail,
-                          ),
-                        );
-                      }
+                          if (_layout == LayoutMode.cards) {
+                            // Full height cards
+                            return PageView.builder(
+                              scrollDirection: Axis.vertical,
+                              controller: PageController(viewportFraction: 1.0),
+                              physics: tanks.length == 1
+                                  ? const NeverScrollableScrollPhysics()
+                                  : const PageScrollPhysics(),
+                              itemCount: tanks.length,
+                              itemBuilder: (_, i) => Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: i == tanks.length - 1 ? 0 : 12,
+                                ),
+                                child: TankCard(
+                                  row: tanks[i],
+                                  onOpen: _openTankDetail,
+                                  useFahrenheit: useFahrenheit,
+                                ),
+                              ),
+                            );
+                          } else if (_layout == LayoutMode.list) {
+                            // compact list view
+                            return ListView.separated(
+                              itemCount: tanks.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 12),
+                              itemBuilder: (_, i) => TankListTile(
+                                row: tanks[i],
+                                onOpen: _openTankDetail,
+                                useFahrenheit: useFahrenheit,
+                              ),
+                            );
+                          } else {
+                            // grid2: two side by side, vertical scroll
+                            return GridView.builder(
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 0.78,
+                              ),
+                              itemCount: tanks.length,
+                              itemBuilder: (_, i) => TankGridCard(
+                                row: tanks[i],
+                                onOpen: _openTankDetail,
+                                useFahrenheit: useFahrenheit,
+                              ),
+                            );
+                          }
+                        },
+                      );
                     },
                   ),
                 ),
+
 
                 const SizedBox(height: 30),
               ],
             ),
           ),
 
-Positioned(
-  right: 16,
-  bottom: 16 + 56,
-  child: FloatingActionButton.extended(
-    backgroundColor: const Color(0xFF06b6d4),
-    onPressed: _openAddTankSheet,
-    icon: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(
-          Icons.add,
-          size: 20,
-          color: Colors.white,
-        ),
-        const SizedBox(width: 5),
-        Icon(
-          MdiIcons.fishbowlOutline, // not const
-          size: 30,
-          color: Colors.white,
-        ),
-      ],
-    ),
-    label: const SizedBox.shrink(),
-    extendedPadding: const EdgeInsets.symmetric(horizontal: 10),
-  ),
-),
+          Positioned(
+            right: 16,
+            bottom: 16 + 56,
+            child: FloatingActionButton.extended(
+              backgroundColor: RotalaColors.teal,
+              onPressed: _openAddTankSheet,
+              icon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.add,
+                    size: 20,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 5),
+                  Icon(
+                    MdiIcons.fishbowlOutline,
+                    size: 30,
+                    color: Colors.white,
+                  ),
+                ],
+              ),
+              label: const SizedBox.shrink(),
+              extendedPadding:
+                  const EdgeInsets.symmetric(horizontal: 10),
+            ),
+          ),
         ],
       ),
     );
@@ -269,7 +632,8 @@ Positioned(
       decoration: InputDecoration(
         hintText: 'Search tanks',
         hintStyle: const TextStyle(color: Colors.white70),
-        prefixIcon: const Icon(Icons.search, color: Colors.white70),
+        prefixIcon:
+            const Icon(Icons.search, color: Colors.white70),
         filled: true,
         fillColor: const Color(0xFF0b1220),
         border: OutlineInputBorder(
@@ -277,7 +641,10 @@ Positioned(
           borderSide: BorderSide.none,
         ),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 12,
+          horizontal: 12,
+        ),
       ),
     );
   }
@@ -338,11 +705,12 @@ Positioned(
   void _openTankDetail(Tank tank) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => TankDetailPage(tank: tank)),
+      MaterialPageRoute(
+        builder: (_) => TankDetailPage(tank: tank),
+      ),
     );
   }
 
-  // This now only used if you call it elsewhere. Left in case you still want the assistant.
   Future<void> _openAssistantSheet() async {
     final input = TextEditingController();
     await showModalBottomSheet<void>(
@@ -378,7 +746,10 @@ Positioned(
                 decoration: const InputDecoration(
                   hintText: 'Ask about your tanks or devices',
                   hintStyle: TextStyle(color: Colors.white70),
-                  prefixIcon: Icon(Icons.smart_toy, color: Colors.white70),
+                  prefixIcon: Icon(
+                    Icons.smart_toy,
+                    color: Colors.white70,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -396,137 +767,426 @@ Positioned(
     );
   }
 
-  // Alerts bottom sheet with uid null guard
-  Future<void> _openAlertsSheet() async {
-    final uid = _supa.auth.currentUser?.id;
+  // tasks bottom sheet with search and filter
+  // tasks bottom sheet with search, status filter, and tank filter
+// tasks bottom sheet with status filter and tank filter (no search bar)
+// tasks bottom sheet with status filter and tank filter (no search bar)
+Future<void> _openTasksSheet() async {
+  final uid = _supa.auth.currentUser?.id;
 
+  if (uid == null) {
     await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1f2937),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) {
-        if (uid == null) {
-          return const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Sign in to view alerts',
-              style: TextStyle(color: Colors.white70),
-            ),
-          );
-        }
-
-        // No .eq on stream to avoid compile error. Filter in the builder.
-        final stream = _supa
-            .from('alerts')
-            .stream(primaryKey: ['id'])
-            .order('created_at', ascending: false);
-
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Alerts',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Alert center preview. Automatic alerts and custom rules will roll out in a future update.',
-                style: TextStyle(
-                  color: Colors.white60,
-                  fontSize: 12,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: stream,
-                  builder: (context, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    final items = (snap.data ?? const [])
-                        .where((r) => r['user_id'] == uid)
-                        .toList();
-
-                    if (items.isEmpty) {
-                      return const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text(
-                          'No alerts',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                      );
-                    }
-
-                    return ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: items.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(color: Colors.white12),
-                      itemBuilder: (_, i) {
-                        final a = items[i];
-                        final msg = a['message']?.toString() ?? 'Alert';
-                        final created =
-                            DateTime.tryParse(a['created_at']?.toString() ?? '') ??
-                                DateTime.now();
-
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(
-                            Icons.notification_important,
-                            color: Colors.amber,
-                          ),
-                          title: Text(
-                            msg,
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          subtitle: Text(
-                            _fmtDateShort(created),
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // bottom sheet to add a tank
-  Future<void> _openAddTankSheet() async {
-    _pendingImageBytes = null;
-    _pendingImageName = null;
-
-    final formKey = GlobalKey<FormState>();
-    final nameCtrl = TextEditingController();
-    final gallonsCtrl = TextEditingController();
-    String waterType = 'freshwater';
-
-    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF1f2937),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setStateSheet) {
+      builder: (_) {
+        return const Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Sign in to view tasks',
+            style: TextStyle(color: Colors.white70),
+          ),
+        );
+      },
+    );
+    return;
+  }
+
+  // load tasks once before opening to avoid setState during build
+  await _loadGlobalTasks();
+
+  // load tanks for filter dropdown
+  final List<dynamic> tanks = await _supa
+      .from('tanks')
+      .select('id,name')
+      .order('created_at');
+
+  // local state for this sheet
+  _TaskFilter filter = _TaskFilter.open;
+  String? selectedTankId; // null means "All tanks"
+
+  // track tasks that are in the middle of a toggle so the user
+  // can see the checkbox animation before the row moves
+  final Set<String> pendingToggles = <String>{};
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF111827),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (_) {
+      final cardColor = const Color(0xFF1f2937);
+
+      return SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              Future<void> refresh() async {
+                await _loadGlobalTasks();
+                setSheet(() {});
+              }
+
+              // apply status and tank filter
+              List<_GlobalTask> visible = List.of(_globalTasks);
+
+              if (filter == _TaskFilter.open) {
+                visible = visible.where((t) => !t.done).toList();
+              } else if (filter == _TaskFilter.completed) {
+                visible = visible.where((t) => t.done).toList();
+              }
+
+              if (selectedTankId != null) {
+                visible = visible.where((t) => t.tankId == selectedTankId).toList();
+              }
+
+              Widget body;
+
+              if (_loadingGlobalTasks) {
+                body = const Expanded(
+                  child: Center(
+                    child: CircularProgressIndicator(color: Colors.teal),
+                  ),
+                );
+              } else if (visible.isEmpty) {
+                body = Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'No tasks match your filters.',
+                          style: TextStyle(color: Colors.white70),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white24),
+                          ),
+                          onPressed: () async {
+                            await _createOrEditGlobalTask();
+                            await refresh();
+                          },
+                          icon: const Icon(Icons.add_task),
+                          label: const Text('Add Task'),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              } else {
+                body = Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    itemCount: visible.length + 1,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      if (i == visible.length) {
+                        return OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white24),
+                          ),
+                          onPressed: () async {
+                            await _createOrEditGlobalTask();
+                            await refresh();
+                          },
+                          icon: const Icon(Icons.add_task),
+                          label: const Text('Add Task'),
+                        );
+                      }
+
+                      final t = visible[i];
+
+                      // while a task is in pendingToggles, show the checkbox in the
+                      // opposite state of its stored value so the animation is visible
+                      final bool checkboxValue = pendingToggles.contains(t.id)
+                          ? !t.done
+                          : t.done;
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: CheckboxListTile(
+                          value: checkboxValue,
+                          onChanged: (v) async {
+                            if (v == null) return;
+
+                            // immediately show the visual toggle
+                            setSheet(() {
+                              pendingToggles.add(t.id);
+                            });
+
+                            try {
+                              // brief pause so the user can see the check
+                              await Future.delayed(
+                                const Duration(milliseconds: 220),
+                              );
+
+                              // commit to Supabase
+                              await _supa
+                                  .from('tank_tasks')
+                                  .update({'done': v})
+                                  .eq('id', t.id);
+
+                              pendingToggles.remove(t.id);
+
+                              await refresh();
+
+                              // show confirmation with Undo
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    v ? 'Task marked complete' : 'Task reopened',
+                                  ),
+                                  duration: const Duration(seconds: 3),
+                                  action: SnackBarAction(
+                                    label: 'Undo',
+                                    onPressed: () async {
+                                      try {
+                                        await _supa
+                                            .from('tank_tasks')
+                                            .update({'done': !v})
+                                            .eq('id', t.id);
+                                        await refresh();
+                                      } catch (e) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Could not undo: $e'),
+                                            backgroundColor: Colors.redAccent,
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              pendingToggles.remove(t.id);
+                              await refresh();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Could not update task: $e'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                            }
+                          },
+                          title: Text(
+                            t.title,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: t.due == null
+                              ? null
+                              : Text(
+                                  'Due ${_timeExactGlobal(t.due!)}',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          checkboxShape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          activeColor: Colors.teal,
+                          secondary: PopupMenuButton<String>(
+                            icon: const Icon(
+                              Icons.more_vert,
+                              color: Colors.white70,
+                            ),
+                            onSelected: (v) async {
+                              if (v == 'edit') {
+                                await _createOrEditGlobalTask(existing: t);
+                                await refresh();
+                              }
+                              if (v == 'delete') {
+                                await _deleteGlobalTask(t);
+                                await refresh();
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Edit'),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // header row
+                  Row(
+                    children: [
+                      const Icon(Icons.checklist, color: Colors.white),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Tasks',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.add, color: Colors.white),
+                        onPressed: () async {
+                          await _createOrEditGlobalTask();
+                          await refresh();
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // tank filter dropdown
+                  DropdownButtonFormField<String?>(
+                    value: selectedTankId,
+                    dropdownColor: const Color(0xFF1f2937),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All tanks'),
+                      ),
+                      for (final t in tanks)
+                        DropdownMenuItem<String?>(
+                          value: t['id'] as String,
+                          child: Text(
+                            t['name']?.toString() ?? 'Tank',
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) {
+                      selectedTankId = v;
+                      setSheet(() {});
+                    },
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Filter by tank',
+                      labelStyle: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // status filter chips
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('All'),
+                        labelStyle: TextStyle(
+                          color: filter == _TaskFilter.all
+                              ? Colors.black
+                              : Colors.white70,
+                        ),
+                        selected: filter == _TaskFilter.all,
+                        selectedColor: Colors.tealAccent,
+                        backgroundColor: const Color(0xFF0b1220),
+                        onSelected: (_) {
+                          filter = _TaskFilter.all;
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Open'),
+                        labelStyle: TextStyle(
+                          color: filter == _TaskFilter.open
+                              ? Colors.black
+                              : Colors.white70,
+                        ),
+                        selected: filter == _TaskFilter.open,
+                        selectedColor: Colors.tealAccent,
+                        backgroundColor: const Color(0xFF0b1220),
+                        onSelected: (_) {
+                          filter = _TaskFilter.open;
+                          setSheet(() {});
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Completed'),
+                        labelStyle: TextStyle(
+                          color: filter == _TaskFilter.completed
+                              ? Colors.black
+                              : Colors.white70,
+                        ),
+                        selected: filter == _TaskFilter.completed,
+                        selectedColor: Colors.tealAccent,
+                        backgroundColor: const Color(0xFF0b1220),
+                        onSelected: (_) {
+                          filter = _TaskFilter.completed;
+                          setSheet(() {});
+                        },
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  body,
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    },
+  );
+}
+
+
+
+
+  // bottom sheet to add a tank
+Future<void> _openAddTankSheet() async {
+  _pendingImageBytes = null;
+  _pendingImageName = null;
+
+  final formKey = GlobalKey<FormState>();
+  final nameCtrl = TextEditingController();
+  final volumeCtrl = TextEditingController();
+  String waterType = 'freshwater';
+
+  final saved = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0xFF1f2937),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (ctx, setStateSheet) {
           return Padding(
             padding: EdgeInsets.only(
               left: 16,
@@ -536,172 +1196,246 @@ Positioned(
             ),
             child: Form(
               key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Add Tank',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useGallons,
+                builder: (context, useGallons, _) {
+                  final volumeLabel =
+                      useGallons ? 'Volume (gallons)' : 'Volume (liters)';
+                  final volumeHelper = useGallons
+                      ? 'Enter tank size in gallons'
+                      : 'Enter tank size in liters';
 
-                  // Name
-                  TextFormField(
-                    controller: nameCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                      labelStyle: TextStyle(color: Colors.white70),
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Water type
-                  DropdownButtonFormField<String>(
-                    value: waterType,
-                    dropdownColor: const Color(0xFF0b1220),
-                    items: const [
-                      DropdownMenuItem(value: 'freshwater', child: Text('Freshwater')),
-                      DropdownMenuItem(value: 'saltwater', child: Text('Saltwater')),
-                      DropdownMenuItem(value: 'brackish', child: Text('Brackish')),
-                    ],
-                    onChanged: (v) => waterType = v ?? 'freshwater',
-                    decoration: const InputDecoration(
-                      labelText: 'Water type',
-                      labelStyle: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Gallons
-                  TextFormField(
-                    controller: gallonsCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: 'Volume (gallons)',
-                      labelStyle: TextStyle(color: Colors.white70),
-                    ),
-                    validator: (v) {
-                      final n = double.tryParse((v ?? '').trim());
-                      if (n == null || n <= 0) return 'Enter a number > 0';
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Photo picker
-                  Row(
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.photo_camera_back, color: Colors.white70),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text('Photo (optional)', style: TextStyle(color: Colors.white70)),
-                      ),
-                      TextButton.icon(
-                        onPressed: () => _pickFrom(ImageSource.gallery, setStateSheet),
-                        icon: const Icon(Icons.photo_library),
-                        label: const Text('Gallery'),
-                      ),
-                      const SizedBox(width: 6),
-                      TextButton.icon(
-                        onPressed: () => _pickFrom(ImageSource.camera, setStateSheet),
-                        icon: const Icon(Icons.photo_camera),
-                        label: const Text('Camera'),
-                      ),
-                    ],
-                  ),
-                  if (_pendingImageBytes != null) ...[
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.memory(
-                        _pendingImageBytes!,
-                        height: 120,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
+                      const Text(
+                        'Add Tank',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () async {
-                            if (!formKey.currentState!.validate()) return;
+                      const SizedBox(height: 12),
 
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Saving...'), duration: Duration(seconds: 1)),
-                            );
+                      // Name
+                      TextFormField(
+                        controller: nameCtrl,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          labelText: 'Name',
+                          labelStyle: TextStyle(color: Colors.white70),
+                        ),
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      ),
+                      const SizedBox(height: 12),
 
-                            try {
-                              final uid = _supa.auth.currentUser!.id;
-                              String? imageUrl;
-                              if (_pendingImageBytes != null) {
-                                imageUrl = await _uploadTankImage(_pendingImageBytes!);
-                              }
+                      // Water type
+                      DropdownButtonFormField<String>(
+                        value: waterType,
+                        dropdownColor: const Color(0xFF1f2937),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'freshwater',
+                            child: Text('Freshwater'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'saltwater',
+                            child: Text('Saltwater'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'brackish',
+                            child: Text('Brackish'),
+                          ),
+                        ],
+                        onChanged: (v) => waterType = v ?? 'freshwater',
+                        decoration: const InputDecoration(
+                          labelText: 'Water type',
+                          labelStyle: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
 
-                              await _supa.from('tanks').insert({
-                                'user_id': uid,
-                                'name': nameCtrl.text.trim(),
-                                'water_type': waterType,
-                                'volume_gallons': double.parse(gallonsCtrl.text.trim()),
-                                if (imageUrl != null) 'image_url': imageUrl,
-                              });
+                      // Volume (reactive to gallons vs liters)
+                      TextFormField(
+                        controller: volumeCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: volumeLabel,
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          helperText: volumeHelper,
+                          helperStyle: const TextStyle(color: Colors.white38),
+                        ),
+                        validator: (v) {
+                          final n = double.tryParse((v ?? '').trim());
+                          if (n == null || n <= 0) {
+                            return 'Enter a number greater than 0';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
 
-                              if (mounted) {
-                                Navigator.pop(ctx, true);
+                      // Photo picker
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.photo_camera_back,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Photo (optional)',
+                              style: TextStyle(
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () =>
+                                _pickFrom(ImageSource.gallery, setStateSheet),
+                            icon: const Icon(Icons.photo_library),
+                            label: const Text('Gallery'),
+                          ),
+                          const SizedBox(width: 6),
+                          TextButton.icon(
+                            onPressed: () =>
+                                _pickFrom(ImageSource.camera, setStateSheet),
+                            icon: const Icon(Icons.photo_camera),
+                            label: const Text('Camera'),
+                          ),
+                        ],
+                      ),
+                      if (_pendingImageBytes != null) ...[
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.memory(
+                            _pendingImageBytes!,
+                            height: 120,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () async {
+                                if (!formKey.currentState!.validate()) {
+                                  return;
+                                }
+
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Tank added')),
-                                );
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Failed: $e'),
-                                    backgroundColor: Colors.redAccent,
+                                  const SnackBar(
+                                    content: Text('Saving...'),
+                                    duration: Duration(seconds: 1),
                                   ),
                                 );
-                              }
-                            }
-                          },
-                          child: const Text('Save'),
-                        ),
+
+                                try {
+                                  final uid = _supa.auth.currentUser!.id;
+                                  String? imageUrl;
+                                  if (_pendingImageBytes != null) {
+                                    imageUrl =
+                                        await _uploadTankImage(_pendingImageBytes!);
+                                  }
+
+                                  // Convert to liters and gallons with liters as source of truth
+                                  final raw = double.parse(
+                                    volumeCtrl.text.trim(),
+                                  );
+                                  final useGallonsNow =
+                                      AppSettings.useGallons.value;
+
+                                  final double gallons;
+                                  final double liters;
+
+                                  if (useGallonsNow) {
+                                    gallons = raw;
+                                    liters = gallons * 3.785411784;
+                                  } else {
+                                    liters = raw;
+                                    gallons = liters / 3.785411784;
+                                  }
+
+                                  await _supa.from('tanks').insert({
+                                    'user_id': uid,
+                                    'name': nameCtrl.text.trim(),
+                                    'water_type': waterType,
+                                    'volume_liters': liters,
+                                    'volume_gallons': gallons,
+                                    if (imageUrl != null) 'image_url': imageUrl,
+                                  });
+
+                                  if (mounted) {
+                                    Navigator.pop(ctx, true);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Tank added'),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed: $e'),
+                                        backgroundColor: Colors.redAccent,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: const Text('Save'),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
+                  );
+                },
               ),
             ),
           );
-        });
-      },
-    );
+        },
+      );
+    },
+  );
 
-    if (saved == true) {
-      // StreamBuilder auto refresh
-    }
+  if (saved == true) {
+    // StreamBuilder auto refresh
   }
+}
+
 
   // Manual entry bottom sheet
   Future<void> _openManualEntrySheet() async {
     try {
-      final tanks = await _supa.from('tanks').select('id,name').order('created_at');
+      final tanks = await _supa
+          .from('tanks')
+          .select('id,name')
+          .order('created_at');
       if (!mounted) return;
 
-      String? tankId = tanks.isNotEmpty ? tanks.first['id'] as String : null;
+      String? tankId =
+          tanks.isNotEmpty ? tanks.first['id'] as String : null;
       final phCtrl = TextEditingController();
       final tdsCtrl = TextEditingController();
       final tempCtrl = TextEditingController();
@@ -711,7 +1445,8 @@ Positioned(
         isScrollControlled: true,
         backgroundColor: const Color(0xFF1f2937),
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(16)),
         ),
         builder: (ctx) {
           return Padding(
@@ -721,100 +1456,167 @@ Positioned(
               top: 16,
               bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
             ),
-            child: StatefulBuilder(builder: (ctx, setSheet) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Add reading',
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: tankId,
-                    dropdownColor: const Color(0xFF0b1220),
-                    items: [
-                      for (final t in tanks)
-                        DropdownMenuItem(
-                          value: t['id'] as String,
-                          child: Text(t['name']?.toString() ?? 'Tank'),
-                        ),
-                    ],
-                    onChanged: (v) => setSheet(() => tankId = v),
-                    decoration: const InputDecoration(
-                      labelText: 'Tank',
-                      labelStyle: TextStyle(color: Colors.white70),
+            child: StatefulBuilder(
+              builder: (ctx, setSheet) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Add reading',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: phCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'pH'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: tdsCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'TDS ppm'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: tempCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Temperature °C'),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: tankId == null
-                          ? null
-                          : () async {
-                              try {
-                                await _supa.from('measurements').insert({
-                                  'tank_id': tankId,
-                                  if (phCtrl.text.trim().isNotEmpty)
-                                    'ph': double.tryParse(phCtrl.text.trim()),
-                                  if (tdsCtrl.text.trim().isNotEmpty)
-                                    'tds': double.tryParse(tdsCtrl.text.trim()),
-                                  if (tempCtrl.text.trim().isNotEmpty)
-                                    'temperature_c': double.tryParse(tempCtrl.text.trim()),
-                                });
-                                if (mounted) Navigator.pop(ctx);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Reading added')),
-                                  );
-                                }
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Failed: $e'),
-                                      backgroundColor: Colors.redAccent,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                      child: const Text('Save'),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: tankId,
+                      dropdownColor: const Color(0xFF1f2937),
+                      items: [
+                        for (final t in tanks)
+                          DropdownMenuItem(
+                            value: t['id'] as String,
+                            child: Text(
+                              t['name']?.toString() ??
+                                  'Tank',
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) =>
+                          setSheet(() => tankId = v),
+                      decoration: const InputDecoration(
+                        labelText: 'Tank',
+                        labelStyle:
+                            TextStyle(color: Colors.white70),
+                      ),
                     ),
-                  ),
-                ],
-              );
-            }),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'pH',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: tdsCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'TDS ppm',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: tempCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Temperature °C',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: tankId == null
+                            ? null
+                            : () async {
+                                try {
+                                  await _supa
+                                      .from('sensor_readings')
+                                      .insert({
+                                    'tank_id': tankId,
+                                    if (phCtrl.text
+                                        .trim()
+                                        .isNotEmpty)
+                                      'ph': double.tryParse(
+                                        phCtrl.text
+                                            .trim(),
+                                      ),
+                                    if (tdsCtrl.text
+                                        .trim()
+                                        .isNotEmpty)
+                                      'tds':
+                                          double.tryParse(
+                                        tdsCtrl.text
+                                            .trim(),
+                                      ),
+                                    if (tempCtrl.text
+                                        .trim()
+                                        .isNotEmpty)
+                                      'temperature_c':
+                                          double.tryParse(
+                                        tempCtrl.text
+                                            .trim(),
+                                      ),
+                                  });
+                                  if (mounted) {
+                                    Navigator.pop(ctx);
+                                  }
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Reading added',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Failed: $e',
+                                        ),
+                                        backgroundColor:
+                                            Colors.redAccent,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                        child: const Text('Save'),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           );
         },
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not open manual entry: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open manual entry: $e',
+          ),
+        ),
+      );
     }
   }
 
   // Image helpers
-  Future<void> _pickFrom(ImageSource source, void Function(void Function()) setStateSheet) async {
+  Future<void> _pickFrom(
+    ImageSource source,
+    void Function(void Function()) setStateSheet,
+  ) async {
     try {
       final xfile = await _picker.pickImage(
         source: source,
@@ -828,7 +1630,11 @@ Positioned(
       setStateSheet(() {});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Image error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Image error: $e'),
+        ),
+      );
     }
   }
 
@@ -848,8 +1654,9 @@ Positioned(
           ),
         );
 
-    final signed =
-        await _supa.storage.from('tank-images').createSignedUrl(path, 60 * 60 * 24 * 30);
+    final signed = await _supa.storage
+        .from('tank-images')
+        .createSignedUrl(path, 60 * 60 * 24 * 30);
     return signed;
   }
 
@@ -857,7 +1664,8 @@ Positioned(
   void _exportCsvComingSoon() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('CSV export is coming in a future update'),
+        content:
+            Text('CSV export is coming in a future update'),
         duration: Duration(seconds: 2),
       ),
     );
@@ -870,3 +1678,21 @@ Positioned(
         "/${d.day.toString().padLeft(2, '0')}";
   }
 }
+
+class _GlobalTask {
+  final String id;
+  final String title;
+  final bool done;
+  final DateTime? due;
+  final String? tankId;
+
+  const _GlobalTask({
+    required this.id,
+    required this.title,
+    required this.done,
+    this.due,
+    this.tankId,
+  });
+}
+
+enum _TaskFilter { all, open, completed }

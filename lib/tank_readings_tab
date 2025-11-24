@@ -1,0 +1,127 @@
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:your_app/models/tank_models.dart';
+
+class TankReadingsTab extends StatelessWidget {
+  const TankReadingsTab({
+    super.key,
+    required this.cardColor,
+    required this.loading,
+    required this.series,
+    required this.onSeriesChanged,
+    required this.period,
+    required this.onPeriodChanged,
+    required this.points,
+    required this.spotsFor,
+    required this.chartDataFor,
+    required this.timeExact,
+    required this.onEditManual,
+  });
+
+  final Color cardColor;
+  final bool loading;
+  final ParamType series;
+  final ValueChanged<ParamType> onSeriesChanged;
+  final Period period;
+  final ValueChanged<Period> onPeriodChanged;
+  final List<MeasurePoint> points;
+
+  final List<FlSpot> Function(ParamType) spotsFor;
+  final LineChartData Function(ParamType) chartDataFor;
+
+  final String Function(DateTime) timeExact;
+  final void Function(MeasurePoint) onEditManual;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SizedBox(
+            height: 260,
+            child: loading
+                ? const Center(
+                    child: CircularProgressIndicator(color: Colors.teal),
+                  )
+                : spotsFor(series).isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No data',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : LineChart(chartDataFor(series)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<Period>(
+          value: period,
+          dropdownColor: const Color(0xFF0b1220),
+          decoration: const InputDecoration(
+            labelText: 'Period',
+            labelStyle: TextStyle(color: Colors.white70),
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(
+              value: Period.days7,
+              child: Text('7 days'),
+            ),
+            DropdownMenuItem(
+              value: Period.month1,
+              child: Text('1 month'),
+            ),
+            DropdownMenuItem(
+              value: Period.year1,
+              child: Text('1 year'),
+            ),
+            DropdownMenuItem(
+              value: Period.all,
+              child: Text('All time'),
+            ),
+          ],
+          onChanged: (v) {
+            if (v != null) onPeriodChanged(v);
+          },
+        ),
+        const SizedBox(height: 12),
+        ...points.reversed.take(200).map((p) {
+          final isManual = p.deviceUid == null;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: ListTile(
+              dense: true,
+              textColor: Colors.white,
+              iconColor: Colors.white70,
+              leading: const Icon(Icons.timeline),
+              title: Text(timeExact(p.at)),
+              subtitle: Text(
+                'Temp: ${p.tempC?.toStringAsFixed(1) ?? '-'} °C   '
+                'pH: ${p.ph?.toStringAsFixed(2) ?? '-'}   '
+                'TDS: ${p.tds?.toStringAsFixed(0) ?? '-'} ppm',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              trailing: isManual
+                  ? IconButton(
+                      tooltip: 'Edit manual reading',
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => onEditManual(p),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}

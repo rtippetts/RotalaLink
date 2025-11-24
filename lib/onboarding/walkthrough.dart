@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../theme/rotala_brand.dart'; // adjust path if needed
+import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
+
 const String kWalkthroughSeenKey = 'walkthrough_seen_v1';
 
 class WalkthroughScreen extends StatefulWidget {
   const WalkthroughScreen({super.key});
 
+  /// Mark walkthrough as seen in both local prefs and Supabase user metadata
   static Future<void> markSeen() async {
-    // You can keep this if you still want to track that they saw it,
-    // but it no longer controls whether it shows or not.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(kWalkthroughSeenKey, true);
 
@@ -26,39 +28,70 @@ class WalkthroughScreen extends StatefulWidget {
     }
   }
 
-  // Always return false so the app always shows the walkthrough
+  /// Check both Supabase metadata and local prefs
+  /// If either says it was seen, we treat it as seen
   static Future<bool> hasSeen() async {
-    return false;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      final md = user.userMetadata ?? {};
+      if (md['walkthrough_seen'] == true) {
+        return true;
+      }
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(kWalkthroughSeenKey) ?? false;
+  }
+
+  /// Helper to show the walkthrough from anywhere (Home, Settings, etc)
+  static Future<void> show(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const WalkthroughScreen(),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   @override
   State<WalkthroughScreen> createState() => _WalkthroughScreenState();
 }
 
+
 class _WalkthroughScreenState extends State<WalkthroughScreen> {
   final _controller = PageController();
   int _index = 0;
 
-  final _pages = const [
+  late final List<_WTPage> _pages = [
     _WTPage(
-      icon: Icons.water_drop,
-      title: 'Track your tanks',
-      body: 'Add each tank and record pH, TDS, and temperature.',
+      icon: MdiIcons.fishbowlOutline, // aquarium icon for Add tank
+      title: 'Add your tanks',
+      body:
+          'Create a tank for each aquarium with its name, size, and water type so RotalaLink can keep everything organized.',
     ),
-    _WTPage(
-      icon: Icons.notifications,
-      title: 'Stay ahead of issues',
-      body: 'See alerts and handle problems before they get serious.',
+    const _WTPage(
+      icon: Icons.bluetooth_connected,
+      title: 'Add your AquaSpec',
+      body:
+          'Use the Bluetooth connection button to pair your AquaSpec device and begin automatic testing.',
     ),
-    _WTPage(
+    const _WTPage(
       icon: Icons.add_chart,
-      title: 'Add readings fast',
-      body: 'Use Quick Actions to log tests in seconds.',
+      title: 'Manually add readings',
+      body:
+          'No device yet? No worries. Log readings by hand to track pH, TDS, and temperature for each tank.',
     ),
-    _WTPage(
-      icon: Icons.grid_view,
-      title: 'Choose your layout',
-      body: 'Switch between grid, list, or full cards.',
+    const _WTPage(
+      icon: Icons.add_task,
+      title: 'Set tasks and reminders',
+      body:
+          'Create tasks for water changes, filter cleanings, and other maintenance so you never miss a step.',
+    ),
+    const _WTPage(
+      icon: Icons.settings,
+      title: 'Configure your settings',
+      body:
+          'Adjust temperature units, notifications, and other preferences. More options, including streaks and badges, are coming soon!',
     ),
   ];
 
@@ -105,15 +138,28 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _finish,
-                      child: const Text('Done'),
-                    ),
+                  // Back arrow (disabled and faded on first page)
+                  IconButton(
+                    onPressed: _index == 0
+                        ? null
+                        : () {
+                            _controller.previousPage(
+                              duration:
+                                  const Duration(milliseconds: 250),
+                              curve: Curves.easeOut,
+                            );
+                          },
+                    icon: const Icon(Icons.arrow_back),
+                    color: _index == 0
+                        ? Colors.white24
+                        : RotalaColors.teal,
                   ),
-                  const SizedBox(width: 12),
+                  const Spacer(),
                   Expanded(
                     child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: RotalaColors.teal,
+                      ),
                       onPressed: last
                           ? _finish
                           : () {
@@ -155,7 +201,11 @@ class _WTPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 96, color: Colors.cyanAccent),
+          Icon(
+            icon,
+            size: 96,
+            color: RotalaColors.teal,
+          ),
           const SizedBox(height: 24),
           Text(
             title,
@@ -199,7 +249,7 @@ class _Dots extends StatelessWidget {
           height: 8,
           width: active ? 22 : 8,
           decoration: BoxDecoration(
-            color: active ? Colors.cyanAccent : Colors.white24,
+            color: active ? RotalaColors.teal : Colors.white24,
             borderRadius: BorderRadius.circular(10),
           ),
         );
