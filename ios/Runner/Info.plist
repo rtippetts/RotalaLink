@@ -22,6 +22,8 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+
+	<!-- URL Scheme -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -31,32 +33,45 @@
 			<array>
 				<string>rotala</string>
 			</array>
-			<key>NSCameraUsageDescription</key>
-			<string>This app uses the camera to take photos of your tanks.</string>
-			<key>NSPhotoLibraryUsageDescription</key>
-			<string>This app needs access to your photo library to select tank photos.</string>
 		</dict>
 	</array>
+
+	<!-- CAMERA + PHOTO PERMISSIONS MUST BE HERE -->
+	<key>NSCameraUsageDescription</key>
+	<string>RotalaLink uses the camera to take photos of your tanks.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>RotalaLink needs access to your photo library to select tank photos.</string>
+
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>RotalaLink saves tank photos to your library.</string>
+
+	<!-- Bluetooth Permissions -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>RotalaLink uses Bluetooth to connect to your AquaSpec device.</string>
+
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>RotalaLink uses Bluetooth to connect to your AquaSpec device.</string>
+
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>RotalaLink uses Bluetooth to connect to your RotalaPen and read tank parameters.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>RotalaLink uses Bluetooth to connect to your RotalaPen and read tank parameters.</string>
+
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
+	<!-- Orientation Lock -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-
 	</array>
+
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -64,5 +79,6 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
 </dict>
 </plist>

@@ -116,28 +116,27 @@ class _AppScaffoldState extends State<AppScaffold> {
   }
 
   Future<void> _signOut() async {
-  HapticFeedback.mediumImpact();
+    HapticFeedback.mediumImpact();
 
-  // Close the drawer if open, but don't crash if it cannot pop
-  if (Navigator.of(context).canPop()) {
-    Navigator.of(context).pop();
+    // Close the drawer if open, but don't crash if it cannot pop
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {
+      // ignore for now, still send user to login
+    }
+
+    // After an await, always make sure the State is still mounted
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
   }
-
-  try {
-    await Supabase.instance.client.auth.signOut();
-  } catch (_) {
-    // ignore for now, still send user to login
-  }
-
-  // After an await, always make sure the State is still mounted
-  if (!mounted) return;
-
-  Navigator.of(context).pushAndRemoveUntil(
-    MaterialPageRoute(builder: (_) => const LoginPage()),
-    (route) => false,
-  );
-}
-
 
   Widget _comingSoonLabel() {
     return Container(
@@ -173,23 +172,25 @@ class _AppScaffoldState extends State<AppScaffold> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
-        bool busy = false;
+        bool busy = false;       // for connect / disconnect
+        bool scanning = false;   // for active scan state
         String status =
             ble.isConnected ? 'Device connected' : 'No device connected';
         List<DiscoveredDevice> devices = [];
 
         Future<void> startScan(StateSetter setSheet) async {
-          if (busy) return;
+          if (scanning || busy) return;
 
           setSheet(() {
-            busy = true;
+            scanning = true;
             status = 'Requesting permissions…';
+            devices = [];
           });
 
           final ok = await ble.ensurePermissions();
           if (!ok) {
             setSheet(() {
-              busy = false;
+              scanning = false;
               status = 'Bluetooth permission denied';
             });
             return;
@@ -197,7 +198,6 @@ class _AppScaffoldState extends State<AppScaffold> {
 
           setSheet(() {
             status = 'Scanning for devices…';
-            devices = [];
           });
 
           await scanSub?.cancel();
@@ -209,9 +209,19 @@ class _AppScaffoldState extends State<AppScaffold> {
             });
           }, onError: (e) {
             setSheet(() {
-              busy = false;
+              scanning = false;
               status = 'Scan error: $e';
             });
+          });
+        }
+
+        Future<void> stopScan(StateSetter setSheet) async {
+          await scanSub?.cancel();
+          setSheet(() {
+            scanning = false;
+            status = devices.isEmpty
+                ? 'No devices found'
+                : 'Scan stopped';
           });
         }
 
@@ -221,6 +231,7 @@ class _AppScaffoldState extends State<AppScaffold> {
         ) async {
           setSheet(() {
             busy = true;
+            scanning = false;
             status = 'Connecting to ${d.name.isEmpty ? d.id : d.name}…';
           });
 
@@ -256,6 +267,7 @@ class _AppScaffoldState extends State<AppScaffold> {
           await notifSub?.cancel();
           setSheet(() {
             busy = false;
+            scanning = false;
             status = 'Disconnected';
           });
         }
@@ -270,6 +282,7 @@ class _AppScaffoldState extends State<AppScaffold> {
           child: StatefulBuilder(
             builder: (ctx, setSheet) {
               final connected = ble.isConnected;
+              final showSpinner = busy || scanning;
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
@@ -298,7 +311,7 @@ class _AppScaffoldState extends State<AppScaffold> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  if (busy) ...[
+                  if (showSpinner) ...[
                     const Padding(
                       padding: EdgeInsets.only(bottom: 12),
                       child: CircularProgressIndicator(),
@@ -378,14 +391,23 @@ class _AppScaffoldState extends State<AppScaffold> {
                       width: double.infinity,
                       child: FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: RotalaColors.teal,
+                          backgroundColor: scanning
+                              ? const Color(0xFFFF6F4D)        // brand coral for stop
+                              : RotalaColors.teal,              // teal for scan
                         ),
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text(
-                          'Scan for devices',
-                          style: TextStyle(fontSize: 14),
+                        icon: Icon(
+                          scanning ? Icons.stop : Icons.refresh,
+                          size: 18,
                         ),
-                        onPressed: busy ? null : () => startScan(setSheet),
+                        label: Text(
+                          scanning ? 'Stop scanning' : 'Scan for devices',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () => scanning
+                                ? stopScan(setSheet)
+                                : startScan(setSheet),
                       ),
                     ),
                   ] else ...[
