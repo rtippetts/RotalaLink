@@ -1,14 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import '../home.dart';
 import '../devices.dart';
 import '../chatbot.dart';
 import '../community.dart';
 import '../login_page.dart';
-import '../device_page.dart';
 import '../theme/rotala_brand.dart';
+import '../ble/ble_manager.dart';
 
 class AppScaffold extends StatefulWidget {
   final int currentIndex;
@@ -28,6 +29,7 @@ class AppScaffold extends StatefulWidget {
 
 class _AppScaffoldState extends State<AppScaffold> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _bleSheetOpen = false;
 
   Future<_DeviceStatus> _fetchDeviceStatus() async {
     try {
@@ -61,12 +63,10 @@ class _AppScaffoldState extends State<AppScaffold> {
   }
 
   void _goTab(int index) {
-    // If user taps the current tab, do nothing
     if (index == widget.currentIndex) {
       return;
     }
 
-    // Coming soon tabs: show snackbar and haptic
     if (index == 2 || index == 3) {
       HapticFeedback.lightImpact();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -116,22 +116,28 @@ class _AppScaffoldState extends State<AppScaffold> {
   }
 
   Future<void> _signOut() async {
-    HapticFeedback.mediumImpact();
+  HapticFeedback.mediumImpact();
 
-    // Close the drawer if open
+  // Close the drawer if open, but don't crash if it cannot pop
+  if (Navigator.of(context).canPop()) {
     Navigator.of(context).pop();
-
-    try {
-      await Supabase.instance.client.auth.signOut();
-    } catch (_) {
-      // ignore for now, still send user to login
-    }
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-      (route) => false,
-    );
   }
+
+  try {
+    await Supabase.instance.client.auth.signOut();
+  } catch (_) {
+    // ignore for now, still send user to login
+  }
+
+  // After an await, always make sure the State is still mounted
+  if (!mounted) return;
+
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const LoginPage()),
+    (route) => false,
+  );
+}
+
 
   Widget _comingSoonLabel() {
     return Container(
@@ -151,12 +157,292 @@ class _AppScaffoldState extends State<AppScaffold> {
     );
   }
 
+  void _openBleSheet() {
+    if (_bleSheetOpen) return;
+    _bleSheetOpen = true;
+
+    final ble = BleManager.I;
+    StreamSubscription<DiscoveredDevice>? scanSub;
+    StreamSubscription<List<int>>? notifSub;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1f2937),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        bool busy = false;
+        String status =
+            ble.isConnected ? 'Device connected' : 'No device connected';
+        List<DiscoveredDevice> devices = [];
+
+        Future<void> startScan(StateSetter setSheet) async {
+          if (busy) return;
+
+          setSheet(() {
+            busy = true;
+            status = 'Requesting permissions…';
+          });
+
+          final ok = await ble.ensurePermissions();
+          if (!ok) {
+            setSheet(() {
+              busy = false;
+              status = 'Bluetooth permission denied';
+            });
+            return;
+          }
+
+          setSheet(() {
+            status = 'Scanning for devices…';
+            devices = [];
+          });
+
+          await scanSub?.cancel();
+          scanSub = ble.startScan().listen((d) {
+            setSheet(() {
+              if (!devices.any((x) => x.id == d.id)) {
+                devices.add(d);
+              }
+            });
+          }, onError: (e) {
+            setSheet(() {
+              busy = false;
+              status = 'Scan error: $e';
+            });
+          });
+        }
+
+        Future<void> connectTo(
+          DiscoveredDevice d,
+          StateSetter setSheet,
+        ) async {
+          setSheet(() {
+            busy = true;
+            status = 'Connecting to ${d.name.isEmpty ? d.id : d.name}…';
+          });
+
+          await scanSub?.cancel();
+          await ble.connect(d);
+
+          if (ble.isConnected) {
+            setSheet(() {
+              busy = false;
+              status = 'Device connected';
+            });
+
+            await notifSub?.cancel();
+            notifSub = ble.notifications().listen((bytes) {
+              final text = String.fromCharCodes(bytes);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('From device: $text')),
+                );
+              }
+            });
+          } else {
+            setSheet(() {
+              busy = false;
+              status = 'Failed to connect';
+            });
+          }
+        }
+
+        Future<void> disconnect(StateSetter setSheet) async {
+          await ble.disconnect();
+          await scanSub?.cancel();
+          await notifSub?.cancel();
+          setSheet(() {
+            busy = false;
+            status = 'Disconnected';
+          });
+        }
+
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 32,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setSheet) {
+              final connected = ble.isConnected;
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const Text(
+                    'AquaSpec device',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    status,
+                    style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  if (busy) ...[
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: CircularProgressIndicator(),
+                    ),
+                  ],
+                  if (!connected) ...[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: const Text(
+                        'Nearby devices',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (devices.isEmpty)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading:
+                            const Icon(Icons.search, color: Colors.white70),
+                        title: const Text(
+                          'No devices found yet',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                        subtitle: const Text(
+                          'Turn your AquaSpec on and scan below',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                          ),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        height: 200,
+                        child: ListView.builder(
+                          itemCount: devices.length,
+                          itemBuilder: (ctx, index) {
+                            final d = devices[index];
+                            final name = d.name.isEmpty ? d.id : d.name;
+                            return Card(
+                              color: const Color(0xFF111827),
+                              child: ListTile(
+                                title: Text(
+                                  name,
+                                  style:
+                                      const TextStyle(color: Colors.white),
+                                ),
+                                subtitle: Text(
+                                  d.id,
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                trailing: FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: RotalaColors.teal,
+                                  ),
+                                  onPressed: busy
+                                      ? null
+                                      : () => connectTo(d, setSheet),
+                                  child: const Text(
+                                    'Connect',
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: RotalaColors.teal,
+                        ),
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text(
+                          'Scan for devices',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        onPressed: busy ? null : () => startScan(setSheet),
+                      ),
+                    ),
+                  ] else ...[
+                    Card(
+                      color: const Color(0xFF111827),
+                      child: const ListTile(
+                        leading: Icon(
+                          Icons.bluetooth_connected,
+                          color: Colors.tealAccent,
+                        ),
+                        title: Text(
+                          'Device connected',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                        subtitle: Text(
+                          'Your AquaSpec is linked to this phone',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.redAccent,
+                        ),
+                        icon: const Icon(Icons.link_off, size: 18),
+                        label: const Text(
+                          'Disconnect device',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        onPressed: () => disconnect(setSheet),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+        );
+      },
+    ).whenComplete(() async {
+      _bleSheetOpen = false;
+      await scanSub?.cancel();
+      await notifSub?.cancel();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFF0b1220),
-
       appBar: AppBar(
         backgroundColor: const Color(0xFF0b1220),
         elevation: 0,
@@ -189,17 +475,14 @@ class _AppScaffoldState extends State<AppScaffold> {
                   st.online ? RotalaColors.teal : Colors.white70;
 
               return IconButton(
-                tooltip:
-                    st.online ? 'Device connected' : 'Device not connected',
+                tooltip: st.online
+                    ? 'Device connected'
+                    : 'Connect your AquaSpec device',
                 icon: Icon(icon, color: color),
                 onPressed: () {
                   HapticFeedback.selectionClick();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DevicePage(),
-                    ),
-                  );
+                  if (_bleSheetOpen) return;
+                  _openBleSheet();
                 },
               );
             },
@@ -207,7 +490,6 @@ class _AppScaffoldState extends State<AppScaffold> {
           const SizedBox(width: 8),
         ],
       ),
-
       drawer: Drawer(
         backgroundColor: const Color(0xFF0b1220),
         child: SafeArea(
@@ -228,20 +510,12 @@ class _AppScaffoldState extends State<AppScaffold> {
                 ),
               ),
               const Divider(height: 1, color: Colors.white24),
-
               _DrawerItem(
                 icon: Icons.home_rounded,
                 label: 'Home',
                 selected: widget.currentIndex == 0,
                 onTap: () => _goTab(0),
               ),
-              _DrawerItem(
-                icon: Icons.devices_other_rounded,
-                label: 'Devices',
-                selected: widget.currentIndex == 1,
-                onTap: () => _goTab(1),
-              ),
-
               _DrawerItem(
                 icon: Icons.smart_toy_rounded,
                 label: 'RALA',
@@ -256,10 +530,8 @@ class _AppScaffoldState extends State<AppScaffold> {
                 comingSoon: true,
                 onTap: () => _goTab(3),
               ),
-
               const Spacer(),
               const Divider(height: 1, color: Colors.white24),
-
               ListTile(
                 leading: const Icon(
                   Icons.logout_rounded,
@@ -275,7 +547,6 @@ class _AppScaffoldState extends State<AppScaffold> {
           ),
         ),
       ),
-
       body: widget.body,
     );
   }

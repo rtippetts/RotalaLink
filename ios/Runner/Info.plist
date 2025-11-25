@@ -31,6 +31,10 @@
 			<array>
 				<string>rotala</string>
 			</array>
+			<key>NSCameraUsageDescription</key>
+			<string>This app uses the camera to take photos of your tanks.</string>
+			<key>NSPhotoLibraryUsageDescription</key>
+			<string>This app needs access to your photo library to select tank photos.</string>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
@@ -50,8 +54,8 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
