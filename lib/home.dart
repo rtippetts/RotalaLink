@@ -1305,7 +1305,6 @@ Future<void> _openAddTankSheet() async {
                             icon: const Icon(Icons.photo_library),
                             label: const Text('Gallery'),
 ),
-
                           const SizedBox(width: 6),
                           TextButton.icon(
                             onPressed: () async {
