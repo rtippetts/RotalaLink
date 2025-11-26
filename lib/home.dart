@@ -1298,15 +1298,21 @@ Future<void> _openAddTankSheet() async {
                             ),
                           ),
                           TextButton.icon(
-                            onPressed: () =>
-                                _pickFrom(ImageSource.gallery, setStateSheet),
+                            onPressed: () async {
+                              FocusScope.of(ctx).unfocus();
+                              await _pickFrom(ImageSource.gallery, setStateSheet);
+                            },
                             icon: const Icon(Icons.photo_library),
                             label: const Text('Gallery'),
-                          ),
+),
+
                           const SizedBox(width: 6),
                           TextButton.icon(
-                            onPressed: () =>
-                                _pickFrom(ImageSource.camera, setStateSheet),
+                            onPressed: () async {
+                              // Use the sheet context (ctx) for focus so the sheet does not get weird
+                              FocusScope.of(ctx).unfocus();
+                              await _pickFrom(ImageSource.camera, setStateSheet);
+                            },
                             icon: const Icon(Icons.photo_camera),
                             label: const Text('Camera'),
                           ),
@@ -1614,29 +1620,50 @@ Future<void> _openAddTankSheet() async {
 
   // Image helpers
   Future<void> _pickFrom(
-    ImageSource source,
-    void Function(void Function()) setStateSheet,
-  ) async {
-    try {
-      final xfile = await _picker.pickImage(
-        source: source,
-        maxWidth: 1600,
-        imageQuality: 85,
-      );
-      if (xfile == null) return;
+  ImageSource source,
+  void Function(void Function()) setStateSheet,
+) async {
+  try {
+    // This closes any open keyboard before opening camera/gallery,
+    // which helps keep the bottom sheet stable on iOS.
+    FocusScope.of(context).unfocus();
 
-      _pendingImageBytes = await xfile.readAsBytes();
-      _pendingImageName = xfile.name;
-      setStateSheet(() {});
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Image error: $e'),
-        ),
-      );
+    final xfile = await _picker.pickImage(
+      source: source,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (xfile == null) {
+      // User cancelled
+      return;
     }
+
+    final bytes = await xfile.readAsBytes();
+
+    // At this point the bottom sheet *should* still be in the tree.
+    // If for some reason it was dismissed, setStateSheet would throw,
+    // so we wrap it defensively.
+    try {
+      setStateSheet(() {
+        _pendingImageBytes = bytes;
+        _pendingImageName = xfile.name;
+      });
+    } catch (_) {
+      // Sheet was closed; just keep the bytes so next time you open
+      // the sheet we can still use them if you want.
+      _pendingImageBytes = bytes;
+      _pendingImageName = xfile.name;
+    }
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Image error: $e'),
+      ),
+    );
   }
+}
+
 
   /// Uploads to 'tank images' bucket at '{uid}/tanks/{uuid}.jpg'
   /// Returns a signed URL for display
