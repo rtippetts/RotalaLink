@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'theme/rotala_brand.dart';
 import 'app_settings.dart';
+import 'dart:async';
 
 
 
@@ -60,6 +61,9 @@ enum LayoutMode { grid2, list, cards }
 
 class _HomePageState extends State<HomePage> {
   late final Stream<List<Map<String, dynamic>>> _tankStream;
+
+   bool _retryingTanks = false;   // new
+
 
   // picker plus in sheet image state
   final _picker = ImagePicker();
@@ -448,7 +452,32 @@ class _HomePageState extends State<HomePage> {
     await _supa.from('tank_tasks').delete().eq('id', t.id);
     await _loadGlobalTasks();
   }
+ Future<void> _retryLoadTanks() async {
+  setState(() {
+    _retryingTanks = true;
+  });
 
+  try {
+    // Small ping to Supabase, but give up quickly if there is no network
+    await _supa
+        .from('tanks')
+        .select('id')
+        .limit(1)
+        .timeout(const Duration(seconds: 4));
+    // Success: leave _retryingTanks = true for now.
+    // The StreamBuilder will clear it when data arrives.
+  } on TimeoutException {
+    if (!mounted) return;
+    setState(() {
+      _retryingTanks = false;  // back to Try again
+    });
+  } catch (_) {
+    if (!mounted) return;
+    setState(() {
+      _retryingTanks = false;  // back to Try again
+    });
+  }
+}
   @override
   Widget build(BuildContext context) {
     // Friendly title with first name if present
@@ -487,105 +516,161 @@ class _HomePageState extends State<HomePage> {
 
                                 // Rebuild tank views when the temperature unit changes
                 Expanded(
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: AppSettings.useFahrenheit,
-                    builder: (context, useFahrenheit, _) {
-                      return StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: _tankStream,
-                        builder: (context, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          }
-                          if (snap.hasError) {
-                            return Center(
-                              child: Text(
-                                'Error loading tanks: ${snap.error}',
-                                style: const TextStyle(color: Colors.redAccent),
-                              ),
-                            );
-                          }
+  child: ValueListenableBuilder<bool>(
+    valueListenable: AppSettings.useFahrenheit,
+    builder: (context, useFahrenheit, _) {
+      return StreamBuilder<List<Map<String, dynamic>>>(
+  stream: _tankStream,
+  builder: (context, snap) {
+    if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
 
-                          final all = snap.data ?? const [];
-                          final q = _searchCtrl.text.trim().toLowerCase();
-                          final tanks = q.isEmpty
-                              ? all
-                              : all.where((row) {
-                                  final name = (row['name'] ?? '')
-                                      .toString()
-                                      .toLowerCase();
-                                  return name.contains(q);
-                                }).toList();
+    if (snap.hasError && (snap.data == null || (snap.data?.isEmpty ?? true))) {
+      final msg = snap.error.toString();
+      final isOffline = msg.contains('SocketException') ||
+          msg.contains('Failed host lookup');
 
-                          if (tanks.isEmpty) {
-                            return Center(
-                              child: TextButton.icon(
-                                onPressed: _openAddTankSheet,
-                                icon: const Icon(Icons.add, color: Colors.white),
-                                label: const Text(
-                                  'Add your first tank',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            );
-                          }
+      // While retrying, show a spinner instead of the button
+      if (_retryingTanks) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 12),
+              Text(
+                isOffline
+                    ? 'Reconnecting…'
+                    : 'Trying again…',
+                style: const TextStyle(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        );
+      }
 
-                          if (_layout == LayoutMode.cards) {
-                            // Full height cards
-                            return PageView.builder(
-                              scrollDirection: Axis.vertical,
-                              controller: PageController(viewportFraction: 1.0),
-                              physics: tanks.length == 1
-                                  ? const NeverScrollableScrollPhysics()
-                                  : const PageScrollPhysics(),
-                              itemCount: tanks.length,
-                              itemBuilder: (_, i) => Padding(
-                                padding: EdgeInsets.only(
-                                  bottom: i == tanks.length - 1 ? 0 : 12,
-                                ),
-                                child: TankCard(
-                                  row: tanks[i],
-                                  onOpen: _openTankDetail,
-                                  useFahrenheit: useFahrenheit,
-                                ),
-                              ),
-                            );
-                          } else if (_layout == LayoutMode.list) {
-                            // compact list view
-                            return ListView.separated(
-                              itemCount: tanks.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 12),
-                              itemBuilder: (_, i) => TankListTile(
-                                row: tanks[i],
-                                onOpen: _openTankDetail,
-                                useFahrenheit: useFahrenheit,
-                              ),
-                            );
-                          } else {
-                            // grid2: two side by side, vertical scroll
-                            return GridView.builder(
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                mainAxisSpacing: 12,
-                                crossAxisSpacing: 12,
-                                childAspectRatio: 0.78,
-                              ),
-                              itemCount: tanks.length,
-                              itemBuilder: (_, i) => TankGridCard(
-                                row: tanks[i],
-                                onOpen: _openTankDetail,
-                                useFahrenheit: useFahrenheit,
-                              ),
-                            );
-                          }
-                        },
-                      );
-                    },
-                  ),
-                ),
+      // Normal error state with Try again button
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isOffline ? Icons.wifi_off : Icons.error_outline,
+              color: Colors.white70,
+              size: 40,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isOffline
+                  ? 'Oops, looks like you are offline.'
+                  : 'Something went wrong while loading tanks.',
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _retryLoadTanks,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // normal data path
+    final all = snap.data ?? const [];
+
+// if we were retrying and now have data, stop showing the spinner
+if (_retryingTanks && all.isNotEmpty) {
+  // schedule setState for after this build
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted) {
+      setState(() {
+        _retryingTanks = false;
+      });
+    }
+  });
+}
+
+final q = _searchCtrl.text.trim().toLowerCase();
+final tanks = q.isEmpty
+    ? all
+    : all.where((row) {
+        final name = (row['name'] ?? '').toString().toLowerCase();
+        return name.contains(q);
+      }).toList();
+
+    if (tanks.isEmpty) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: _openAddTankSheet,
+          icon: const Icon(Icons.add, color: Colors.white),
+          label: const Text(
+            'Add your first tank',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+    }
+
+    if (_layout == LayoutMode.cards) {
+      return PageView.builder(
+        scrollDirection: Axis.vertical,
+        controller: PageController(viewportFraction: 1.0),
+        physics: tanks.length == 1
+            ? const NeverScrollableScrollPhysics()
+            : const PageScrollPhysics(),
+        itemCount: tanks.length,
+        itemBuilder: (_, i) => Padding(
+          padding: EdgeInsets.only(
+            bottom: i == tanks.length - 1 ? 0 : 12,
+          ),
+          child: TankCard(
+            row: tanks[i],
+            onOpen: _openTankDetail,
+            useFahrenheit: useFahrenheit,
+          ),
+        ),
+      );
+    } else if (_layout == LayoutMode.list) {
+      return ListView.separated(
+        itemCount: tanks.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (_, i) => TankListTile(
+          row: tanks[i],
+          onOpen: _openTankDetail,
+          useFahrenheit: useFahrenheit,
+        ),
+      );
+    } else {
+      return GridView.builder(
+        gridDelegate:
+            const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 0.78,
+        ),
+        itemCount: tanks.length,
+        itemBuilder: (_, i) => TankGridCard(
+          row: tanks[i],
+          onOpen: _openTankDetail,
+          useFahrenheit: useFahrenheit,
+        ),
+      );
+    }
+  },
+);
+
+    },
+  ),
+),
+
 
 
                 const SizedBox(height: 30),
@@ -1722,3 +1807,4 @@ class _GlobalTask {
 }
 
 enum _TaskFilter { all, open, completed }
+
