@@ -2,6 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../tank_detail_page.dart';
 
+/// Shared label helper
+String _labelForWaterType(String v) {
+  switch (v) {
+    case 'saltwater':
+      return 'Saltwater';
+    case 'brackish':
+      return 'Brackish';
+    default:
+      return 'Freshwater';
+  }
+}
+
 class TankCard extends StatelessWidget {
   const TankCard({
     super.key,
@@ -24,11 +36,10 @@ class TankCard extends StatelessWidget {
 
     // Normalize image url from the row
     final rawImageUrl = (row['image_url'] as String?)?.trim();
-    final imageUrl = (rawImageUrl == null ||
-            rawImageUrl.isEmpty ||
-            rawImageUrl == 'NULL')
-        ? null
-        : rawImageUrl;
+    final imageUrl =
+        (rawImageUrl == null || rawImageUrl.isEmpty || rawImageUrl == 'NULL')
+            ? null
+            : rawImageUrl;
 
     final tank = Tank(
       id: id,
@@ -59,9 +70,10 @@ class TankCard extends StatelessWidget {
                       height: 200,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _placeholderImage(),
+                      errorBuilder: (_, __, ___) =>
+                          _tankPlaceholder(height: 200, width: double.infinity),
                     )
-                  : _placeholderImage(),
+                  : _tankPlaceholder(height: 200, width: double.infinity),
             ),
             const SizedBox(height: 10),
             Padding(
@@ -91,32 +103,6 @@ class TankCard extends StatelessWidget {
       ),
     );
   }
-
-  static String _labelForWaterType(String v) {
-    switch (v) {
-      case 'saltwater':
-        return 'Saltwater';
-      case 'brackish':
-        return 'Brackish';
-      default:
-        return 'Freshwater';
-    }
-  }
-
-  Widget _placeholderImage() => Container(
-        height: 200,
-        width: double.infinity,
-        color: const Color(0xFF0b1220),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Image.asset(
-              'assets/brand/rotalafinalsquare2.png',
-              fit: BoxFit.contain,
-            ),
-          ),
-        ),
-      );
 }
 
 class TankListTile extends StatelessWidget {
@@ -140,11 +126,10 @@ class TankListTile extends StatelessWidget {
     final liters = gallons * 3.785411784;
 
     final rawImageUrl = (row['image_url'] as String?)?.trim();
-    final imageUrl = (rawImageUrl == null ||
-            rawImageUrl.isEmpty ||
-            rawImageUrl == 'NULL')
-        ? null
-        : rawImageUrl;
+    final imageUrl =
+        (rawImageUrl == null || rawImageUrl.isEmpty || rawImageUrl == 'NULL')
+            ? null
+            : rawImageUrl;
 
     final tank = Tank(
       id: id,
@@ -171,9 +156,10 @@ class TankListTile extends StatelessWidget {
                     width: 56,
                     height: 56,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _ph(),
+                    errorBuilder: (_, __, ___) =>
+                        _tankPlaceholder(height: 56, width: 56),
                   )
-                : _ph(),
+                : _tankPlaceholder(height: 56, width: 56),
           ),
           title: Text(
             name,
@@ -203,32 +189,6 @@ class TankListTile extends StatelessWidget {
       ),
     );
   }
-
-  static String _labelForWaterType(String v) {
-    switch (v) {
-      case 'saltwater':
-        return 'Saltwater';
-      case 'brackish':
-        return 'Brackish';
-      default:
-        return 'Freshwater';
-    }
-  }
-
-  static Widget _ph() => Container(
-        width: 56,
-        height: 56,
-        color: const Color(0xFF0b1220),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Image.asset(
-              'assets/brand/rotalafinalsquare2.png',
-              fit: BoxFit.contain,
-            ),
-          ),
-        ),
-      );
 }
 
 class TankGridCard extends StatelessWidget {
@@ -252,11 +212,10 @@ class TankGridCard extends StatelessWidget {
     final liters = gallons * 3.785411784;
 
     final rawImageUrl = (row['image_url'] as String?)?.trim();
-    final imageUrl = (rawImageUrl == null ||
-            rawImageUrl.isEmpty ||
-            rawImageUrl == 'NULL')
-        ? null
-        : rawImageUrl;
+    final imageUrl =
+        (rawImageUrl == null || rawImageUrl.isEmpty || rawImageUrl == 'NULL')
+            ? null
+            : rawImageUrl;
 
     final tank = Tank(
       id: id,
@@ -288,9 +247,10 @@ class TankGridCard extends StatelessWidget {
                       height: 120,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _ph(),
+                      errorBuilder: (_, __, ___) =>
+                          _tankPlaceholder(height: 120, width: double.infinity),
                     )
-                  : _ph(),
+                  : _tankPlaceholder(height: 120, width: double.infinity),
             ),
             const SizedBox(height: 8),
             Padding(
@@ -329,32 +289,6 @@ class TankGridCard extends StatelessWidget {
       ),
     );
   }
-
-  static String _labelForWaterType(String v) {
-    switch (v) {
-      case 'saltwater':
-        return 'Saltwater';
-      case 'brackish':
-        return 'Brackish';
-      default:
-        return 'Freshwater';
-    }
-  }
-
-  static Widget _ph() => Container(
-        height: 120,
-        width: double.infinity,
-        color: const Color(0xFF0b1220),
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Image.asset(
-              'assets/brand/rotalafinalsquare2.png',
-              fit: BoxFit.contain,
-            ),
-          ),
-        ),
-      );
 }
 
 // Latest parameters widget with icons for Temp, pH, TDS
@@ -634,5 +568,31 @@ Widget _stackedMini({
         ),
       ),
     ],
+  );
+}
+
+/// Shared gray placeholder used in all layouts
+Widget _tankPlaceholder({
+  required double height,
+  required double width,
+}) {
+  return Container(
+    height: height,
+    width: width,
+    decoration: const BoxDecoration(
+      color: Color(0xFF1a1a1a),
+    ),
+    child: Center(
+      child: Opacity(
+        opacity: 0.5,
+        child: SizedBox(
+          height: height * 0.4, // logo is 40 percent of box height
+          child: Image.asset(
+            'assets/brand/rotalafinalsquare2.png',
+            fit: BoxFit.contain,
+          ),
+        ),
+      ),
+    ),
   );
 }
