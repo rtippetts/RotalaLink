@@ -78,20 +78,20 @@ class _HomePageState extends State<HomePage> {
   final List<_GlobalTask> _globalTasks = [];
   bool _loadingGlobalTasks = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _tankStream =
-        _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
-    _searchCtrl.addListener(() => setState(() {}));
+ @override
+void initState() {
+  super.initState();
+  _tankStream =
+      _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
+  _searchCtrl.addListener(() => setState(() {}));
 
-    // Load persisted unit settings (F vs C, gallons vs liters)
-    AppSettings.load();
+  AppSettings.load();
 
-    // Show walkthrough once after first frame, if needed
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _maybeShowWalkthrough());
-  }
+  WidgetsBinding.instance
+      .addPostFrameCallback((_) => _maybeShowWalkthrough());
+
+  _loadLayoutMode(); // new
+}
 
 
   Future<void> _openAddTaskSheet() async {
@@ -478,6 +478,46 @@ class _HomePageState extends State<HomePage> {
     });
   }
 }
+Future<void> _loadLayoutMode() async {
+  final prefs = await SharedPreferences.getInstance();
+  final saved = prefs.getString('home_layout_mode');
+
+  if (!mounted) return;
+
+  setState(() {
+    switch (saved) {
+      case 'list':
+        _layout = LayoutMode.list;
+        break;
+      case 'cards':
+        _layout = LayoutMode.cards;
+        break;
+      case 'grid2':
+        _layout = LayoutMode.grid2;
+        break;
+      default:
+        _layout = LayoutMode.grid2; // default
+    }
+  });
+}
+
+Future<void> _saveLayoutMode() async {
+  final prefs = await SharedPreferences.getInstance();
+  String value;
+  switch (_layout) {
+    case LayoutMode.list:
+      value = 'list';
+      break;
+    case LayoutMode.cards:
+      value = 'cards';
+      break;
+    case LayoutMode.grid2:
+      value = 'grid2';
+      break;
+  }
+  await prefs.setString('home_layout_mode', value);
+}
+
   @override
   Widget build(BuildContext context) {
     // Friendly title with first name if present
@@ -756,36 +796,39 @@ final tanks = q.isEmpty
     }
   }
 
-  Widget _layoutToggle() {
-    return Tooltip(
-      message: _hintForNextLayout(),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            // grid2 -> list -> cards -> grid2
-            if (_layout == LayoutMode.grid2) {
-              _layout = LayoutMode.list;
-            } else if (_layout == LayoutMode.list) {
-              _layout = LayoutMode.cards;
-            } else {
-              _layout = LayoutMode.grid2;
-            }
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0b1220),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            _iconForLayout(_layout),
-            color: Colors.white,
-          ),
+Widget _layoutToggle() {
+  return Tooltip(
+    message: _hintForNextLayout(),
+    child: InkWell(
+      onTap: () async {
+        setState(() {
+          // grid2 -> list -> cards -> grid2
+          if (_layout == LayoutMode.grid2) {
+            _layout = LayoutMode.list;
+          } else if (_layout == LayoutMode.list) {
+            _layout = LayoutMode.cards;
+          } else {
+            _layout = LayoutMode.grid2;
+          }
+        });
+
+        await _saveLayoutMode();
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0b1220),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          _iconForLayout(_layout),
+          color: Colors.white,
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   void _openTankDetail(Tank tank) {
     Navigator.push(
