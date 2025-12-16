@@ -46,22 +46,23 @@ class BleManager {
     return statuses.values.every((s) => s.isGranted);
   }
 
-  // -------- Scanning (unfiltered; we filter in UI) --------
-  Stream<DiscoveredDevice> startScan() {
-    _scanSub?.cancel();
-    final controller = StreamController<DiscoveredDevice>.broadcast();
 
-    _scanSub = _ble
-        .scanForDevices(
-          withServices: const [], // all devices
-          scanMode: ScanMode.lowLatency,
-          requireLocationServicesEnabled: false,
-        )
-        .listen(controller.add, onError: controller.addError);
+Stream<DiscoveredDevice> startScan({bool onlyAquaSpecUart = true}) {
+  _scanSub?.cancel();
+  final controller = StreamController<DiscoveredDevice>.broadcast();
 
-    controller.onCancel = () async => await _scanSub?.cancel();
-    return controller.stream;
-  }
+  _scanSub = _ble
+      .scanForDevices(
+        withServices: onlyAquaSpecUart ? [serviceUuid] : const [],
+        scanMode: ScanMode.lowLatency,
+        requireLocationServicesEnabled: false,
+      )
+      .listen(controller.add, onError: controller.addError);
+
+  controller.onCancel = () async => await _scanSub?.cancel();
+  return controller.stream;
+}
+
 
   Future<void> stopScan() async => _scanSub?.cancel();
 
