@@ -1,6 +1,9 @@
 /// ===============================================================
 /// Tank Detail Page — respects AppSettings for units
+/// FULLY FIXED: no duplicate helpers, working Edit Tank, working Delete Tank,
+/// fixed Supabase Storage upload (no broken uploadBinary call)
 /// ===============================================================
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -9,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart' as share;
+
 import 'theme/rotala_brand.dart';
 import 'app_settings.dart';
 
@@ -29,6 +33,38 @@ class _TankDetailPageState extends State<TankDetailPage>
   static const _kCardBg = Color(0xFF1f2937);
   static const _kPageBg = Color(0xFF111827);
   static const _kDanger = Color(0xFFE74C3C);
+
+  // Defaults (canonical storage)
+  // Your historical defaults were 0–100°C, but you now store °F in DB.
+  static const double _defaultIdealTempMinF = 32.0; // 0°C
+  static const double _defaultIdealTempMaxF = 212.0; // 100°C
+  static const double _defaultIdealPhMin = 0.0;
+  static const double _defaultIdealPhMax = 14.0;
+  static const double _defaultIdealTdsMin = 0.0;
+  static const double _defaultIdealTdsMax = 5000.0;
+
+Widget _logoAvatarFallback({required double size}) {
+  return Container(
+    width: size,
+    height: size,
+    decoration: const BoxDecoration(
+      color: Color(0xFF1a1a1a), // same as _tankPlaceholder
+      shape: BoxShape.circle,
+    ),
+    child: Center(
+      child: Opacity(
+        opacity: 0.5,
+        child: SizedBox(
+          height: size * 0.55, // ~40%–60% looks best in a circle
+          child: Image.asset(
+            'assets/brand/rotalafinalsquare2.png',
+            fit: BoxFit.contain,
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
   Color _seriesColor(ParamType t) => switch (t) {
         ParamType.temperature => _kTempBlue,
@@ -125,7 +161,11 @@ class _TankDetailPageState extends State<TankDetailPage>
         .map((r) => MeasurePoint(
               id: r['id'] as String,
               at: DateTime.parse(r['recorded_at']).toLocal(),
-              tempC: (r['temperature'] as num?)?.toDouble(),
+              tempC: (() {
+                final tempF =
+                    (r['temperature'] as num?)?.toDouble(); // DB stores °F
+                return tempF == null ? null : _fToC(tempF); // internal is °C
+              })(),
               ph: (r['ph'] as num?)?.toDouble(),
               tds: (r['tds'] as num?)?.toDouble(),
               deviceUid: r['device_uid'] as String?,
@@ -150,31 +190,22 @@ class _TankDetailPageState extends State<TankDetailPage>
     final last = v.last;
 
     final valueC = last.tempC!;
-    final baseRange = RangeValues(
-      widget.tank.idealTempMin ?? 0,
-      widget.tank.idealTempMax ?? 100,
-    );
+    final valueDisplay = _useFahrenheit ? _cToF(valueC) : valueC;
 
-    if (_useFahrenheit) {
-      return ParameterReading(
-        type: ParamType.temperature,
-        value: _cToF(valueC),
-        unit: '°F',
-        goodRange: RangeValues(
-          _cToF(baseRange.start),
-          _cToF(baseRange.end),
-        ),
-        timestamp: last.at,
-      );
-    } else {
-      return ParameterReading(
-        type: ParamType.temperature,
-        value: valueC,
-        unit: '°C',
-        goodRange: baseRange,
-        timestamp: last.at,
-      );
-    }
+    final minF = widget.tank.idealTempMin ?? _defaultIdealTempMinF;
+    final maxF = widget.tank.idealTempMax ?? _defaultIdealTempMaxF;
+
+    final rangeDisplay = _useFahrenheit
+        ? RangeValues(minF, maxF)
+        : RangeValues(_fToC(minF), _fToC(maxF));
+
+    return ParameterReading(
+      type: ParamType.temperature,
+      value: valueDisplay,
+      unit: _useFahrenheit ? '°F' : '°C',
+      goodRange: rangeDisplay,
+      timestamp: last.at,
+    );
   }
 
   ParameterReading? get latestPh {
@@ -186,8 +217,8 @@ class _TankDetailPageState extends State<TankDetailPage>
       value: last.ph!,
       unit: 'pH',
       goodRange: RangeValues(
-        widget.tank.idealPhMin ?? 0,
-        widget.tank.idealPhMax ?? 14,
+        widget.tank.idealPhMin ?? _defaultIdealPhMin,
+        widget.tank.idealPhMax ?? _defaultIdealPhMax,
       ),
       timestamp: last.at,
     );
@@ -202,8 +233,8 @@ class _TankDetailPageState extends State<TankDetailPage>
       value: last.tds!,
       unit: 'ppm',
       goodRange: RangeValues(
-        widget.tank.idealTdsMin ?? 0,
-        widget.tank.idealTdsMax ?? 5000,
+        widget.tank.idealTdsMin ?? _defaultIdealTdsMin,
+        widget.tank.idealTdsMax ?? _defaultIdealTdsMax,
       ),
       timestamp: last.at,
     );
@@ -235,7 +266,8 @@ class _TankDetailPageState extends State<TankDetailPage>
     Future<void> addPhotos() async {
       final xfiles = await picker.pickMultiImage(imageQuality: 90);
       if (xfiles.isEmpty) return;
-      setState(() => busy = true);
+      busy = true;
+      if (mounted) setState(() {});
       final noteId = existing?.id ?? const Uuid().v4();
       for (final xf in xfiles) {
         final ext = xf.path.split('.').last.toLowerCase();
@@ -244,22 +276,18 @@ class _TankDetailPageState extends State<TankDetailPage>
         await Supabase.instance.client.storage
             .from(bucket)
             .upload(path, File(xf.path));
-        final url = Supabase.instance.client.storage
-            .from(bucket)
-            .getPublicUrl(path);
-        photos.add(
-          NotePhoto(id: pid, storagePath: path, publicUrl: url),
-        );
+        final url =
+            Supabase.instance.client.storage.from(bucket).getPublicUrl(path);
+        photos.add(NotePhoto(id: pid, storagePath: path, publicUrl: url));
       }
-      setState(() => busy = false);
+      busy = false;
+      if (mounted) setState(() {});
     }
 
     Future<void> deleteStagedPhoto(NotePhoto p) async {
-      await Supabase.instance.client.storage
-          .from(bucket)
-          .remove([p.storagePath]);
+      await Supabase.instance.client.storage.from(bucket).remove([p.storagePath]);
       photos.removeWhere((x) => x.storagePath == p.storagePath);
-      setState(() {});
+      if (mounted) setState(() {});
     }
 
     final saved = await showModalBottomSheet<bool>(
@@ -349,11 +377,8 @@ class _TankDetailPageState extends State<TankDetailPage>
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     padding: const EdgeInsets.all(2),
-                                    child: const Icon(
-                                      Icons.close,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
+                                    child: const Icon(Icons.close,
+                                        color: Colors.white, size: 16),
                                   ),
                                 ),
                               ),
@@ -388,11 +413,11 @@ class _TankDetailPageState extends State<TankDetailPage>
                           onPressed: busy
                               ? null
                               : () async {
-                                  if (!formKey.currentState!.validate()) {
-                                    return;
-                                  }
+                                  if (!formKey.currentState!.validate()) return;
+
                                   final supa = Supabase.instance.client;
                                   final userId = uid;
+
                                   if (existing == null) {
                                     final noteId = const Uuid().v4();
                                     await supa.from('tank_notes').insert({
@@ -402,10 +427,9 @@ class _TankDetailPageState extends State<TankDetailPage>
                                       'title': title.text.trim(),
                                       'body': body.text.trim(),
                                     });
+
                                     if (photos.isNotEmpty) {
-                                      await supa
-                                          .from('tank_note_photos')
-                                          .insert([
+                                      await supa.from('tank_note_photos').insert([
                                         for (final p in photos)
                                           {
                                             'note_id': noteId,
@@ -415,25 +439,18 @@ class _TankDetailPageState extends State<TankDetailPage>
                                       ]);
                                     }
                                   } else {
-                                    await supa
-                                        .from('tank_notes')
-                                        .update({
-                                          'title': title.text.trim(),
-                                          'body': body.text.trim(),
-                                        })
-                                        .eq('id', existing.id);
-                                    final existingPaths = existing.photos
-                                        .map((e) => e.storagePath)
-                                        .toSet();
+                                    await supa.from('tank_notes').update({
+                                      'title': title.text.trim(),
+                                      'body': body.text.trim(),
+                                    }).eq('id', existing.id);
+
+                                    final existingPaths =
+                                        existing.photos.map((e) => e.storagePath).toSet();
                                     final newOnes = photos
-                                        .where((p) =>
-                                            !existingPaths
-                                                .contains(p.storagePath))
+                                        .where((p) => !existingPaths.contains(p.storagePath))
                                         .toList();
                                     if (newOnes.isNotEmpty) {
-                                      await supa
-                                          .from('tank_note_photos')
-                                          .insert([
+                                      await supa.from('tank_note_photos').insert([
                                         for (final p in newOnes)
                                           {
                                             'note_id': existing.id,
@@ -443,6 +460,7 @@ class _TankDetailPageState extends State<TankDetailPage>
                                       ]);
                                     }
                                   }
+
                                   if (!mounted) return;
                                   Navigator.pop(ctx, true);
                                 },
@@ -487,9 +505,9 @@ class _TankDetailPageState extends State<TankDetailPage>
 
     final supa = Supabase.instance.client;
     if (n.photos.isNotEmpty) {
-      await supa.storage.from('tank-notes').remove(
-            [for (final p in n.photos) p.storagePath],
-          );
+      await supa.storage
+          .from('tank-notes')
+          .remove([for (final p in n.photos) p.storagePath]);
       await supa.from('tank_note_photos').delete().eq('note_id', n.id);
     }
     await supa.from('tank_notes').delete().eq('id', n.id);
@@ -514,10 +532,10 @@ class _TankDetailPageState extends State<TankDetailPage>
     String? readingId,
     String? suggestedTitle,
   }) async {
-    final title = TextEditingController(
-      text: existing?.title ?? suggestedTitle ?? '',
-    );
+    final title =
+        TextEditingController(text: existing?.title ?? suggestedTitle ?? '');
     DateTime? due = existing?.due;
+
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => StatefulBuilder(builder: (ctx, setSheet) {
@@ -533,9 +551,9 @@ class _TankDetailPageState extends State<TankDetailPage>
               const SizedBox(height: 8),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(
-                  due == null ? 'No due date' : 'Due: ${_timeExact(due!)}',
-                ),
+                title: Text(due == null
+                    ? 'No due date'
+                    : 'Due: ${_timeExact(due!)}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.edit_calendar),
                   onPressed: () async {
@@ -543,8 +561,7 @@ class _TankDetailPageState extends State<TankDetailPage>
                     final d = await showDatePicker(
                       context: ctx,
                       initialDate: due ?? now,
-                      firstDate:
-                          now.subtract(const Duration(days: 3650)),
+                      firstDate: now.subtract(const Duration(days: 3650)),
                       lastDate: now.add(const Duration(days: 3650)),
                     );
                     if (d == null) return;
@@ -552,15 +569,13 @@ class _TankDetailPageState extends State<TankDetailPage>
                       context: ctx,
                       initialTime: TimeOfDay.fromDateTime(due ?? now),
                     );
-                    setSheet(
-                      () => due = DateTime(
-                        d.year,
-                        d.month,
-                        d.day,
-                        (t?.hour ?? 0),
-                        (t?.minute ?? 0),
-                      ),
-                    );
+                    setSheet(() => due = DateTime(
+                          d.year,
+                          d.month,
+                          d.day,
+                          (t?.hour ?? 0),
+                          (t?.minute ?? 0),
+                        ));
                   },
                 ),
               ),
@@ -583,6 +598,7 @@ class _TankDetailPageState extends State<TankDetailPage>
 
     final supa = Supabase.instance.client;
     final userId = supa.auth.currentUser!.id;
+
     if (existing == null) {
       await supa.from('tank_tasks').insert({
         'tank_id': widget.tank.id,
@@ -597,6 +613,7 @@ class _TankDetailPageState extends State<TankDetailPage>
         'due_at': due?.toUtc().toIso8601String(),
       }).eq('id', existing.id);
     }
+
     await _loadTasks();
     if (mounted) setState(() {});
   }
@@ -621,10 +638,7 @@ class _TankDetailPageState extends State<TankDetailPage>
     );
     if (ok != true) return;
 
-    await Supabase.instance.client
-        .from('tank_tasks')
-        .delete()
-        .eq('id', t.id);
+    await Supabase.instance.client.from('tank_tasks').delete().eq('id', t.id);
     await _loadTasks();
     if (mounted) setState(() {});
   }
@@ -639,8 +653,8 @@ class _TankDetailPageState extends State<TankDetailPage>
     final subtitle =
         '$volumeLabel • ${_labelForWaterType(widget.tank.waterType ?? 'freshwater')}';
 
-    final hasAppBarImg = (widget.tank.imageUrl != null &&
-        widget.tank.imageUrl!.trim().isNotEmpty);
+    final hasAppBarImg =
+        (widget.tank.imageUrl != null && widget.tank.imageUrl!.trim().isNotEmpty);
 
     return Scaffold(
       backgroundColor: _kPageBg,
@@ -653,14 +667,12 @@ class _TankDetailPageState extends State<TankDetailPage>
           children: [
             const SizedBox(width: 8),
             CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.grey.shade700,
-              backgroundImage:
-                  hasAppBarImg ? NetworkImage(widget.tank.imageUrl!) : null,
-              child: hasAppBarImg
-                  ? null
-                  : const Icon(Icons.water_drop, color: Colors.white),
-            ),
+  radius: 20,
+  backgroundColor: Colors.grey.shade700,
+  backgroundImage: hasAppBarImg ? NetworkImage(widget.tank.imageUrl!) : null,
+  child: hasAppBarImg ? null : _logoAvatarFallback(size: 40),
+),
+
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -669,17 +681,13 @@ class _TankDetailPageState extends State<TankDetailPage>
                   Text(
                     widget.tank.name,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 16),
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '$subtitle  •  ${_lastMeasuredLabel()}',
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
               ),
@@ -743,22 +751,18 @@ class _TankDetailPageState extends State<TankDetailPage>
 
     switch (idx) {
       case 0:
-        // Overview tab: add manual reading
         secondaryIcon = Icons.add_chart;
         onPressed = _openManualReadingForm;
         break;
       case 1:
-        // Readings tab: CSV download for this tank
         secondaryIcon = Icons.file_download_outlined;
         onPressed = _exportTankCsv;
         break;
       case 2:
-        // Notes tab: add note
         secondaryIcon = Icons.event_note;
         onPressed = () => _createOrEditNote();
         break;
       case 3:
-        // Tasks tab: add task
         secondaryIcon = Icons.add_task;
         onPressed = () => _createOrEditTask();
         break;
@@ -775,11 +779,7 @@ class _TankDetailPageState extends State<TankDetailPage>
         mainAxisSize: MainAxisSize.min,
         children: [
           if (idx != 0) const SizedBox(width: 5),
-          Icon(
-            secondaryIcon,
-            size: 30,
-            color: Colors.white,
-          ),
+          Icon(secondaryIcon, size: 30, color: Colors.white),
         ],
       ),
       label: const SizedBox.shrink(),
@@ -801,15 +801,12 @@ class _TankDetailPageState extends State<TankDetailPage>
 
       if (list.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No readings to export for this tank'),
-          ),
+          const SnackBar(content: Text('No readings to export for this tank')),
         );
         return;
       }
 
       final buffer = StringBuffer();
-
       buffer.writeln(
         'recorded_at_local,recorded_at_utc,temperature_c,temperature_f,ph,tds_ppm,device_uid',
       );
@@ -820,22 +817,19 @@ class _TankDetailPageState extends State<TankDetailPage>
       }
 
       for (final r in list) {
-        final recordedUtc =
-            DateTime.parse(r['recorded_at'] as String).toUtc();
+        final recordedUtc = DateTime.parse(r['recorded_at'] as String).toUtc();
         final recordedLocal = recordedUtc.toLocal();
 
-        final tempC = (r['temperature'] as num?)?.toDouble();
-        final tempF = tempC == null ? null : _cToF(tempC);
+        final tempF = (r['temperature'] as num?)?.toDouble(); // DB stores °F
+        final tempC = tempF == null ? null : _fToC(tempF);
+
         final ph = (r['ph'] as num?)?.toDouble();
         final tds = (r['tds'] as num?)?.toDouble();
         final deviceUid = r['device_uid'] as String?;
 
-        final localIso = recordedLocal.toIso8601String();
-        final utcIso = recordedUtc.toIso8601String();
-
         buffer.writeln([
-          localIso,
-          utcIso,
+          recordedLocal.toIso8601String(),
+          recordedUtc.toIso8601String(),
           fmtNum(tempC, decimals: 2),
           fmtNum(tempF, decimals: 2),
           fmtNum(ph, decimals: 3),
@@ -848,10 +842,7 @@ class _TankDetailPageState extends State<TankDetailPage>
       final safeTankName = widget.tank.name
           .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
           .toLowerCase();
-
-      final file = File(
-        '${dir.path}/tank_${safeTankName}_readings.csv',
-      );
+      final file = File('${dir.path}/tank_${safeTankName}_readings.csv');
 
       await file.writeAsString(buffer.toString());
 
@@ -862,19 +853,13 @@ class _TankDetailPageState extends State<TankDetailPage>
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Exported ${list.length} readings for ${widget.tank.name}',
-          ),
-        ),
+        SnackBar(content: Text('Exported ${list.length} readings for ${widget.tank.name}')),
       );
     } catch (e, st) {
       debugPrint('CSV export failed: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('CSV export failed: $e'),
-        ),
+        SnackBar(content: Text('CSV export failed: $e')),
       );
     }
   }
@@ -909,16 +894,12 @@ class _TankDetailPageState extends State<TankDetailPage>
               children: List.generate(tiles.length, (i) {
                 final reading = tiles[i];
                 final selected = reading.type == _series;
-                final showBadge = ((reading.type == ParamType.temperature &&
-                        tempOOR) ||
+                final showBadge = ((reading.type == ParamType.temperature && tempOOR) ||
                     (reading.type == ParamType.ph && phOOR) ||
-                    (reading.type == ParamType.tds &&
-                        tdsOOR));
+                    (reading.type == ParamType.tds && tdsOOR));
                 return Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(
-                      right: i == tiles.length - 1 ? 0 : 12,
-                    ),
+                    padding: EdgeInsets.only(right: i == tiles.length - 1 ? 0 : 12),
                     child: GestureDetector(
                       onTap: () => setState(() => _series = reading.type),
                       child: _MiniParameterCard(
@@ -935,18 +916,11 @@ class _TankDetailPageState extends State<TankDetailPage>
           else
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: card,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Text(
-                'No recent measurements',
-                style: TextStyle(color: Colors.white70),
-              ),
+              decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+              child: const Text('No recent measurements', style: TextStyle(color: Colors.white70)),
             ),
           const SizedBox(height: 12),
 
-          // Period filter moved here (Overview) under parameter widgets
           DropdownButtonFormField<Period>(
             value: _period,
             dropdownColor: const Color(0xFF0b1220),
@@ -956,22 +930,10 @@ class _TankDetailPageState extends State<TankDetailPage>
               border: OutlineInputBorder(),
             ),
             items: const [
-              DropdownMenuItem(
-                value: Period.days7,
-                child: Text('Last 7 days'),
-              ),
-              DropdownMenuItem(
-                value: Period.month1,
-                child: Text('Last month'),
-              ),
-              DropdownMenuItem(
-                value: Period.year1,
-                child: Text('Last year'),
-              ),
-              DropdownMenuItem(
-                value: Period.all,
-                child: Text('All time'),
-              ),
+              DropdownMenuItem(value: Period.days7, child: Text('Last 7 days')),
+              DropdownMenuItem(value: Period.month1, child: Text('Last month')),
+              DropdownMenuItem(value: Period.year1, child: Text('Last year')),
+              DropdownMenuItem(value: Period.all, child: Text('All time')),
             ],
             onChanged: (v) async {
               setState(() => _period = v ?? _period);
@@ -981,7 +943,6 @@ class _TankDetailPageState extends State<TankDetailPage>
           ),
           const SizedBox(height: 12),
 
-          // Out of range warning card
           Builder(builder: (_) {
             ParameterReading? r;
             if (_series == ParamType.temperature) r = latestTemp;
@@ -989,12 +950,9 @@ class _TankDetailPageState extends State<TankDetailPage>
             if (_series == ParamType.tds) r = latestTds;
             if (r == null) return const SizedBox.shrink();
 
-            final isOOR =
-                (r.value < r.goodRange.start || r.value > r.goodRange.end);
+            final isOOR = (r.value < r.goodRange.start || r.value > r.goodRange.end);
             final k = '${r.type.name}@${r.timestamp.toIso8601String()}';
-            if (!isOOR || _dismissedWarningKeys.contains(k)) {
-              return const SizedBox.shrink();
-            }
+            if (!isOOR || _dismissedWarningKeys.contains(k)) return const SizedBox.shrink();
 
             final text =
                 '${_labelForParam(r.type)} out of range: ${_formatValue(r)} ${r.unit}. Target ${_formatRange(r.goodRange)}';
@@ -1014,20 +972,12 @@ class _TankDetailPageState extends State<TankDetailPage>
                     children: const [
                       Icon(Icons.error_outline, color: _kDanger),
                       SizedBox(width: 8),
-                      Text(
-                        'Warning',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Text('Warning',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    text,
-                    style: const TextStyle(color: Colors.white70),
-                  ),
+                  Text(text, style: const TextStyle(color: Colors.white70)),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -1041,26 +991,20 @@ class _TankDetailPageState extends State<TankDetailPage>
                             context: context,
                             builder: (_) => AlertDialog(
                               title: const Text('Dismiss warning?'),
-                              content: const Text(
-                                'Are you sure you want to dismiss this warning?',
-                              ),
+                              content: const Text('Are you sure you want to dismiss this warning?'),
                               actions: [
                                 TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
+                                  onPressed: () => Navigator.pop(context, false),
                                   child: const Text('Cancel'),
                                 ),
                                 FilledButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, true),
+                                  onPressed: () => Navigator.pop(context, true),
                                   child: const Text('Dismiss'),
                                 ),
                               ],
                             ),
                           );
-                          if (ok == true) {
-                            setState(() => _dismissedWarningKeys.add(k));
-                          }
+                          if (ok == true) setState(() => _dismissedWarningKeys.add(k));
                         },
                         child: const Text('Dismiss'),
                       ),
@@ -1069,12 +1013,8 @@ class _TankDetailPageState extends State<TankDetailPage>
                         onPressed: () {
                           final title =
                               'Fix ${_labelForParam(r!.type)} (${_formatValue(r)} ${r.unit}) • Target ${_formatRange(r.goodRange)}';
-                          final readingId =
-                              _mostRecentReadingIdFor(_series);
-                          _createOrEditTask(
-                            suggestedTitle: title,
-                            readingId: readingId,
-                          );
+                          final readingId = _mostRecentReadingIdFor(_series);
+                          _createOrEditTask(suggestedTitle: title, readingId: readingId);
                           _tabController.index = 3;
                         },
                         icon: const Icon(Icons.add_task),
@@ -1087,29 +1027,19 @@ class _TankDetailPageState extends State<TankDetailPage>
             );
           }),
 
-          // Main graph (still on Overview)
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: card,
-              borderRadius: BorderRadius.circular(16),
-            ),
+            decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
             child: SizedBox(
               height: 260,
               child: _loading
-                  ? const Center(
-                      child: CircularProgressIndicator(color: Colors.teal),
-                    )
+                  ? const Center(child: CircularProgressIndicator(color: Colors.teal))
                   : _spotsFor(_series).isEmpty
                       ? const Center(
-                          child: Text(
-                            'No data for selected parameter',
-                            style: TextStyle(color: Colors.white54),
-                          ),
+                          child: Text('No data for selected parameter',
+                              style: TextStyle(color: Colors.white54)),
                         )
-                      : LineChart(
-                          _buildSingleSeriesChartData(_series),
-                        ),
+                      : LineChart(_buildSingleSeriesChartData(_series)),
             ),
           ),
         ],
@@ -1135,85 +1065,72 @@ class _TankDetailPageState extends State<TankDetailPage>
   }
 
   // ---------- Readings ----------
-   // ---------- Readings ----------
-Widget _buildReadings(Color card) {
-  return ListView(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-    children: [
-      // ADD READING lives at the top
-      OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          side: const BorderSide(color: Colors.white24),
+  Widget _buildReadings(Color card) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: const BorderSide(color: Colors.white24),
+          ),
+          onPressed: _openManualReadingForm,
+          icon: const Icon(Icons.add_chart),
+          label: const Text('Add Reading'),
         ),
-        onPressed: _openManualReadingForm,
-        icon: const Icon(Icons.add_chart),
-        label: const Text('Add Reading'),
-      ),
+        const SizedBox(height: 12),
+        ..._points.reversed.take(200).map((p) {
+          final isManual = p.deviceUid == null;
+          final iconData = isManual ? Icons.edit_note : Icons.sensors;
+          final iconColor = isManual ? Colors.tealAccent : Colors.white70;
 
-      const SizedBox(height: 12),
+          final tempC = p.tempC;
+          final tempUnit = _useFahrenheit ? '°F' : '°C';
 
-      // Then the readings list
-      ..._points.reversed.take(200).map((p) {
-        final isManual = p.deviceUid == null;
-        final iconData = isManual ? Icons.edit_note : Icons.sensors;
-        final iconColor = isManual ? Colors.tealAccent : Colors.white70;
+          String tempStr;
+          if (tempC == null) {
+            tempStr = '-';
+          } else {
+            final displayTemp = _useFahrenheit ? _cToF(tempC) : tempC;
+            tempStr = displayTemp.toStringAsFixed(1);
+          }
 
-        final tempC = p.tempC;
-        final tempUnit = _useFahrenheit ? '°F' : '°C';
-
-        String tempStr;
-        if (tempC == null) {
-          tempStr = '-';
-        } else {
-          final displayTemp =
-              _useFahrenheit ? _cToF(tempC) : tempC;
-          tempStr = displayTemp.toStringAsFixed(1);
-        }
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: ListTile(
-            dense: true,
-            textColor: Colors.white,
-            iconColor: Colors.white70,
-            leading: Icon(iconData, color: iconColor),
-            title: Text(_timeExact(p.at)),
-            subtitle: Text(
-              'Temp: $tempStr $tempUnit   '
-              'pH: ${p.ph?.toStringAsFixed(2) ?? '-'}   '
-              'TDS: ${p.tds?.toStringAsFixed(0) ?? '-'} ppm',
-              style: const TextStyle(color: Colors.white70),
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(10)),
+            child: ListTile(
+              dense: true,
+              textColor: Colors.white,
+              iconColor: Colors.white70,
+              leading: Icon(iconData, color: iconColor),
+              title: Text(_timeExact(p.at)),
+              subtitle: Text(
+                'Temp: $tempStr $tempUnit   '
+                'pH: ${p.ph?.toStringAsFixed(2) ?? '-'}   '
+                'TDS: ${p.tds?.toStringAsFixed(0) ?? '-'} ppm',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: isManual ? 'Edit manual reading' : 'Edit device reading',
+                    icon: const Icon(Icons.edit),
+                    onPressed: () => _editManualReading(p),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete reading',
+                    icon: const Icon(Icons.delete),
+                    onPressed: () => _deleteReading(p),
+                  ),
+                ],
+              ),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  tooltip: isManual
-                      ? 'Edit manual reading'
-                      : 'Edit device reading',
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => _editManualReading(p),
-                ),
-                IconButton(
-                  tooltip: 'Delete reading',
-                  icon: const Icon(Icons.delete),
-                  onPressed: () => _deleteReading(p),
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
-    ],
-  );
-}
-
-
+          );
+        }),
+      ],
+    );
+  }
 
   Future<void> _editManualReading(MeasurePoint p) async {
     final tempUnit = _useFahrenheit ? '°F' : '°C';
@@ -1257,8 +1174,7 @@ Widget _buildReadings(Color card) {
                 ph,
                 decimals: 2,
                 helper: '0 to 14',
-                validator: (v) =>
-                    _optionalRange(v, 0, 14, '0 to 14 or blank'),
+                validator: (v) => _optionalRange(v, 0, 14, '0 to 14 or blank'),
               ),
               const SizedBox(height: 8),
               _numField(
@@ -1271,19 +1187,16 @@ Widget _buildReadings(Color card) {
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  'Recorded at: ${_timeExact(p.at)} (locked)',
-                  style: const TextStyle(fontSize: 12),
-                ),
+                child: Text('Recorded at: ${_timeExact(p.at)} (locked)',
+                    style: const TextStyle(fontSize: 12)),
               ),
             ],
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
               final anyEntered = temp.text.trim().isNotEmpty ||
@@ -1291,10 +1204,7 @@ Widget _buildReadings(Color card) {
                   tds.text.trim().isNotEmpty;
               if (!anyEntered) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Enter at least one value.'),
-                  ),
-                );
+                    const SnackBar(content: Text('Enter at least one value.')));
                 return;
               }
               if (!formKey.currentState!.validate()) return;
@@ -1306,17 +1216,12 @@ Widget _buildReadings(Color card) {
                 tempC = _useFahrenheit ? _fToC(displayVal) : displayVal;
               }
 
-              await Supabase.instance.client
-                  .from('sensor_readings')
-                  .update({
-                'temperature': tempC,
-                'ph': ph.text.trim().isEmpty
-                    ? null
-                    : double.parse(ph.text.trim()),
-                'tds': tds.text.trim().isEmpty
-                    ? null
-                    : double.parse(tds.text.trim()),
+              await Supabase.instance.client.from('sensor_readings').update({
+                'temperature': tempC == null ? null : _cToF(tempC), // store °F in DB
+                'ph': ph.text.trim().isEmpty ? null : double.parse(ph.text.trim()),
+                'tds': tds.text.trim().isEmpty ? null : double.parse(tds.text.trim()),
               }).eq('id', p.id);
+
               if (!mounted) return;
               Navigator.pop(ctx, true);
             },
@@ -1337,18 +1242,10 @@ Widget _buildReadings(Color card) {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete reading?'),
-        content: const Text(
-          'This will permanently remove this reading.',
-        ),
+        content: const Text('This will permanently remove this reading.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
         ],
       ),
     );
@@ -1356,220 +1253,159 @@ Widget _buildReadings(Color card) {
 
     try {
       final supa = Supabase.instance.client;
-
-      debugPrint('Deleting reading id=${p.id}');
-
-      final res = await supa
-          .from('sensor_readings')
-          .delete()
-          .eq('id', p.id);
-
-      debugPrint('Delete response: $res');
-
+      await supa.from('sensor_readings').delete().eq('id', p.id);
       await _loadMeasurements();
       if (mounted) setState(() {});
     } catch (e, st) {
       debugPrint('Error deleting reading: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Delete failed: $e')));
     }
   }
 
   /// ---------- Notes UI ----------
-Widget _buildNotes(Color card) {
-  return ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      // Add Note button at the top
-      OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          side: const BorderSide(color: Colors.white24),
-        ),
-        onPressed: () => _createOrEditNote(),
-        icon: const Icon(Icons.event_note),
-        label: const Text('Add Note'),
-      ),
-      const SizedBox(height: 12),
-
-      // Notes list
-      ..._notes.map(
-        (n) => Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: card,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ListTile(
-            leading: const Icon(Icons.event_note, color: Colors.white70),
-            title: Text(
-              n.title,
-              style: const TextStyle(color: Colors.white),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                if (n.body.trim().isNotEmpty)
-                  Text(
-                    n.body,
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                if (n.photos.isNotEmpty) const SizedBox(height: 8),
-                if (n.photos.isNotEmpty)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final p in n.photos.take(3))
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            p.publicUrl,
-                            width: 70,
-                            height: 70,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      if (n.photos.length > 3)
-                        Text(
-                          '+${n.photos.length - 3} more',
-                          style: const TextStyle(color: Colors.white54),
-                        ),
-                    ],
-                  ),
-                const SizedBox(height: 6),
-                Text(
-                  _timeExact(n.createdAt),
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            trailing: PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.white70),
-              onSelected: (v) {
-                if (v == 'edit') _createOrEditNote(existing: n);
-                if (v == 'delete') _deleteNote(n);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Edit'),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Delete'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ],
-  );
-}
-
-
-  // ---------- Tasks UI ----------
-Widget _buildTasks(Color card) {
-  return ListView.separated(
-    padding: const EdgeInsets.all(16),
-    itemCount: _tasks.length + 1,
-    separatorBuilder: (_, __) => const SizedBox(height: 10),
-    itemBuilder: (context, i) {
-      // First row is Add Task button
-      if (i == 0) {
-        return OutlinedButton.icon(
+  Widget _buildNotes(Color card) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white,
             side: const BorderSide(color: Colors.white24),
           ),
-          onPressed: () => _createOrEditTask(),
-          icon: const Icon(Icons.add_task),
-          label: const Text('Add Task'),
-        );
-      }
-
-      // Tasks start from index 1
-      final t = _tasks[i - 1];
-      return Container(
-        decoration: BoxDecoration(
-          color: card,
-          borderRadius: BorderRadius.circular(12),
+          onPressed: () => _createOrEditNote(),
+          icon: const Icon(Icons.event_note),
+          label: const Text('Add Note'),
         ),
-        child: CheckboxListTile(
-          value: t.done,
-          onChanged: (v) async {
-            await Supabase.instance.client
-                .from('tank_tasks')
-                .update({'done': v ?? false}).eq('id', t.id);
-            await _loadTasks();
-            if (mounted) setState(() {});
-          },
-          title: Text(
-            t.title,
-            style: const TextStyle(color: Colors.white),
+        const SizedBox(height: 12),
+        ..._notes.map(
+          (n) => Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: const Icon(Icons.event_note, color: Colors.white70),
+              title: Text(n.title, style: const TextStyle(color: Colors.white)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
+                  if (n.body.trim().isNotEmpty)
+                    Text(n.body, style: const TextStyle(color: Colors.white70)),
+                  if (n.photos.isNotEmpty) const SizedBox(height: 8),
+                  if (n.photos.isNotEmpty)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final p in n.photos.take(3))
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              p.publicUrl,
+                              width: 70,
+                              height: 70,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        if (n.photos.length > 3)
+                          Text('+${n.photos.length - 3} more',
+                              style: const TextStyle(color: Colors.white54)),
+                      ],
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _timeExact(n.createdAt),
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+              trailing: PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Colors.white70),
+                onSelected: (v) {
+                  if (v == 'edit') _createOrEditNote(existing: n);
+                  if (v == 'delete') _deleteNote(n);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                ],
+              ),
+            ),
           ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (t.due != null)
-                Text(
-                  'Due ${_timeExact(t.due!)}',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-            ],
-          ),
-          controlAffinity: ListTileControlAffinity.leading,
-          checkboxShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(6),
-          ),
-          activeColor: Colors.teal,
-          secondary: PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white70),
-            onSelected: (v) {
-              if (v == 'edit') _createOrEditTask(existing: t);
-              if (v == 'delete') _deleteTask(t);
+        ),
+      ],
+    );
+  }
+
+  // ---------- Tasks UI ----------
+  Widget _buildTasks(Color card) {
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: _tasks.length + 1,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Colors.white24),
+            ),
+            onPressed: () => _createOrEditTask(),
+            icon: const Icon(Icons.add_task),
+            label: const Text('Add Task'),
+          );
+        }
+
+        final t = _tasks[i - 1];
+        return Container(
+          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+          child: CheckboxListTile(
+            value: t.done,
+            onChanged: (v) async {
+              await Supabase.instance.client
+                  .from('tank_tasks')
+                  .update({'done': v ?? false}).eq('id', t.id);
+              await _loadTasks();
+              if (mounted) setState(() {});
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'edit',
-                child: Text('Edit'),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text('Delete'),
-              ),
-            ],
+            title: Text(t.title, style: const TextStyle(color: Colors.white)),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (t.due != null)
+                  Text('Due ${_timeExact(t.due!)}',
+                      style: const TextStyle(color: Colors.white70)),
+              ],
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            activeColor: Colors.teal,
+            secondary: PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Colors.white70),
+              onSelected: (v) {
+                if (v == 'edit') _createOrEditTask(existing: t);
+                if (v == 'delete') _deleteTask(t);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(value: 'delete', child: Text('Delete')),
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
-
+        );
+      },
+    );
+  }
 
   // ---------- Chart helpers ----------
   DateTime get _periodStart {
     final custom = _periodFromDate(_period);
-    final start =
-        custom ?? (_points.isNotEmpty ? _points.first.at : DateTime.now());
+    final start = custom ?? (_points.isNotEmpty ? _points.first.at : DateTime.now());
     return DateTime(start.year, start.month, start.day);
   }
 
-  DateTime get _periodEnd {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day)
-        .add(const Duration(days: 1));
-  }
-
-  double _xDay(DateTime d) =>
-      d.difference(_periodStart).inMinutes / (60 * 24);
+  double _xDay(DateTime d) => d.difference(_periodStart).inMinutes / (60 * 24);
 
   String _mmddForTick(double x) {
     final dt = _periodStart.add(Duration(days: x.round()));
@@ -1580,24 +1416,20 @@ Widget _buildTasks(Color card) {
 
   RangeValues _goodRangeFor(ParamType type) => switch (type) {
         ParamType.temperature => () {
-            final base = RangeValues(
-              widget.tank.idealTempMin ?? 0,
-              widget.tank.idealTempMax ?? 100,
-            );
-            if (_useFahrenheit) {
-              return RangeValues(
-                _cToF(base.start),
-                _cToF(base.end),
-              );
-            }
-            return base;
+            final minF = widget.tank.idealTempMin ?? _defaultIdealTempMinF;
+            final maxF = widget.tank.idealTempMax ?? _defaultIdealTempMaxF;
+            return _useFahrenheit
+                ? RangeValues(minF, maxF)
+                : RangeValues(_fToC(minF), _fToC(maxF));
           }(),
         ParamType.ph => RangeValues(
-            widget.tank.idealPhMin ?? 0,
-            widget.tank.idealPhMax ?? 14),
+            widget.tank.idealPhMin ?? _defaultIdealPhMin,
+            widget.tank.idealPhMax ?? _defaultIdealPhMax,
+          ),
         ParamType.tds => RangeValues(
-            widget.tank.idealTdsMin ?? 0,
-            widget.tank.idealTdsMax ?? 5000),
+            widget.tank.idealTdsMin ?? _defaultIdealTdsMin,
+            widget.tank.idealTdsMax ?? _defaultIdealTdsMax,
+          ),
       };
 
   List<FlSpot> _spotsFor(ParamType type) {
@@ -1617,6 +1449,7 @@ Widget _buildTasks(Color card) {
         ys = _points.map((e) => e.tds).toList();
         break;
     }
+
     final spots = <FlSpot>[];
     for (int i = 0; i < _points.length; i++) {
       final y = ys[i];
@@ -1648,24 +1481,17 @@ Widget _buildTasks(Color card) {
       }
     }
 
-    // Auto fit X axis to the data rather than the whole period
-    // This makes a single reading appear near the left instead of the far right
     double minX;
     double maxX;
-
     if (spots.isEmpty) {
       minX = 0;
       maxX = 1;
     } else {
       final firstX = spots.first.x;
       final lastX = spots.last.x;
-
-      // Small padding so points are not stuck to the edges
       const pad = 0.5;
       minX = firstX - pad;
       maxX = lastX + pad;
-
-      // Ensure minX is never greater than maxX
       if (minX >= maxX) {
         minX = firstX;
         maxX = firstX + 1;
@@ -1692,18 +1518,8 @@ Widget _buildTasks(Color card) {
       ],
       extraLinesData: ExtraLinesData(
         horizontalLines: [
-          HorizontalLine(
-            y: band.start,
-            color: _kDanger,
-            strokeWidth: 1.5,
-            dashArray: [4, 3],
-          ),
-          HorizontalLine(
-            y: band.end,
-            color: _kDanger,
-            strokeWidth: 1.5,
-            dashArray: [4, 3],
-          ),
+          HorizontalLine(y: band.start, color: _kDanger, strokeWidth: 1.5, dashArray: [4, 3]),
+          HorizontalLine(y: band.end, color: _kDanger, strokeWidth: 1.5, dashArray: [4, 3]),
         ],
       ),
       rangeAnnotations: RangeAnnotations(
@@ -1720,23 +1536,15 @@ Widget _buildTasks(Color card) {
           ),
         ],
       ),
-      gridData: const FlGridData(
-        show: true,
-        drawVerticalLine: false,
-      ),
+      gridData: const FlGridData(show: true, drawVerticalLine: false),
       titlesData: FlTitlesData(
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: (maxX - minX) <= 7
-                ? 1
-                : ((maxX - minX) / 6).ceilToDouble(),
+            interval: (maxX - minX) <= 7 ? 1 : ((maxX - minX) / 6).ceilToDouble(),
             getTitlesWidget: (x, _) => Text(
               _mmddForTick(x),
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-              ),
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ),
         ),
@@ -1745,20 +1553,13 @@ Widget _buildTasks(Color card) {
             showTitles: true,
             reservedSize: 38,
             getTitlesWidget: (y, _) => Text(
-              type == ParamType.ph
-                  ? y.toStringAsFixed(1)
-                  : y.toStringAsFixed(0),
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11,
-              ),
+              type == ParamType.ph ? y.toStringAsFixed(1) : y.toStringAsFixed(0),
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ),
         ),
-        rightTitles:
-            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles:
-            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       borderData: FlBorderData(show: false),
     );
@@ -1798,15 +1599,7 @@ Widget _buildTasks(Color card) {
               initialTime: TimeOfDay.fromDateTime(localWhen),
             );
             if (t == null) return;
-            setSheet(
-              () => localWhen = DateTime(
-                d.year,
-                d.month,
-                d.day,
-                t.hour,
-                t.minute,
-              ),
-            );
+            setSheet(() => localWhen = DateTime(d.year, d.month, d.day, t.hour, t.minute));
           }
 
           String whenLabel() {
@@ -1847,20 +1640,11 @@ Widget _buildTasks(Color card) {
                     const SizedBox(height: 12),
                     ListTile(
                       tileColor: Colors.white12,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       onTap: pickDateTime,
-                      leading:
-                          const Icon(Icons.schedule, color: Colors.white),
-                      title: Text(
-                        whenLabel(),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      trailing: const Icon(
-                        Icons.edit_calendar,
-                        color: Colors.white70,
-                      ),
+                      leading: const Icon(Icons.schedule, color: Colors.white),
+                      title: Text(whenLabel(), style: const TextStyle(color: Colors.white)),
+                      trailing: const Icon(Icons.edit_calendar, color: Colors.white70),
                     ),
                     const SizedBox(height: 12),
                     _numField(
@@ -1882,33 +1666,21 @@ Widget _buildTasks(Color card) {
                       ph,
                       decimals: 2,
                       helper: '0 to 14',
-                      validator: (v) => _optionalRange(
-                        v,
-                        0,
-                        14,
-                        'Enter 0 to 14 pH or leave blank',
-                      ),
+                      validator: (v) => _optionalRange(v, 0, 14, 'Enter 0 to 14 pH or leave blank'),
                     ),
                     const SizedBox(height: 10),
                     _numField(
                       'TDS (ppm)',
                       tds,
                       helper: '0 to 5000',
-                      validator: (v) => _optionalRange(
-                        v,
-                        0,
-                        5000,
-                        'Enter 0 to 5000 ppm or leave blank',
-                      ),
+                      validator: (v) => _optionalRange(v, 0, 5000, 'Enter 0 to 5000 ppm or leave blank'),
                     ),
                     const SizedBox(height: 20),
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: saving
-                                ? null
-                                : () => Navigator.pop(ctx, false),
+                            onPressed: saving ? null : () => Navigator.pop(ctx, false),
                             child: const Text('Cancel'),
                           ),
                         ),
@@ -1928,73 +1700,44 @@ Widget _buildTasks(Color card) {
                             onPressed: saving
                                 ? null
                                 : () async {
-                                    final anyEntered =
-                                        temp.text.trim().isNotEmpty ||
-                                            ph.text.trim().isNotEmpty ||
-                                            tds.text.trim().isNotEmpty;
+                                    final anyEntered = temp.text.trim().isNotEmpty ||
+                                        ph.text.trim().isNotEmpty ||
+                                        tds.text.trim().isNotEmpty;
                                     if (!anyEntered) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Enter at least one parameter.',
-                                          ),
-                                        ),
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Enter at least one parameter.')),
                                       );
                                       return;
                                     }
-                                    if (!formKey.currentState!.validate()) {
-                                      return;
-                                    }
+                                    if (!formKey.currentState!.validate()) return;
 
                                     setSheet(() => saving = true);
                                     try {
-                                      final supa =
-                                          Supabase.instance.client;
+                                      final supa = Supabase.instance.client;
 
                                       double? tempC;
-                                      final tempText =
-                                          temp.text.trim();
+                                      final tempText = temp.text.trim();
                                       if (tempText.isNotEmpty) {
-                                        final displayVal =
-                                            double.parse(tempText);
-                                        tempC = _useFahrenheit
-                                            ? _fToC(displayVal)
-                                            : displayVal;
+                                        final displayVal = double.parse(tempText);
+                                        tempC = _useFahrenheit ? _fToC(displayVal) : displayVal;
                                       }
 
-                                      await supa
-                                          .from('sensor_readings')
-                                          .insert({
+                                      await supa.from('sensor_readings').insert({
                                         'tank_id': widget.tank.id,
-                                        'recorded_at': localWhen
-                                            .toUtc()
-                                            .toIso8601String(),
-                                        'temperature': tempC,
-                                        'ph': ph.text.trim().isEmpty
-                                            ? null
-                                            : double.parse(
-                                                ph.text.trim(),
-                                              ),
-                                        'tds': tds.text.trim().isEmpty
-                                            ? null
-                                            : double.parse(
-                                                tds.text.trim(),
-                                              ),
+                                        'recorded_at': localWhen.toUtc().toIso8601String(),
+                                        'temperature': tempC == null ? null : _cToF(tempC), // store °F in DB
+                                        'ph': ph.text.trim().isEmpty ? null : double.parse(ph.text.trim()),
+                                        'tds': tds.text.trim().isEmpty ? null : double.parse(tds.text.trim()),
                                         'device_uid': null,
                                       });
+
                                       if (!mounted) return;
                                       Navigator.pop(ctx, true);
                                     } catch (e) {
                                       setSheet(() => saving = false);
                                       if (!mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Save failed: $e',
-                                          ),
-                                        ),
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Save failed: $e')),
                                       );
                                     }
                                   },
@@ -2016,9 +1759,8 @@ Widget _buildTasks(Color card) {
       await _loadMeasurements();
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Manual reading saved')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Manual reading saved')));
     }
   }
 
@@ -2031,10 +1773,8 @@ Widget _buildTasks(Color card) {
   }) {
     return TextFormField(
       controller: c,
-      keyboardType: const TextInputType.numberWithOptions(
-        decimal: true,
-        signed: false,
-      ),
+      keyboardType:
+          const TextInputType.numberWithOptions(decimal: true, signed: false),
       decoration: InputDecoration(
         border: const OutlineInputBorder(),
         labelText: label,
@@ -2044,12 +1784,7 @@ Widget _buildTasks(Color card) {
     );
   }
 
-  static String? _optionalRange(
-    String? v,
-    double lo,
-    double hi,
-    String msgIfBad,
-  ) {
+  static String? _optionalRange(String? v, double lo, double hi, String msgIfBad) {
     final s = v?.trim() ?? '';
     if (s.isEmpty) return null;
     final n = double.tryParse(s);
@@ -2058,46 +1793,66 @@ Widget _buildTasks(Color card) {
     return null;
   }
 
-  // ---------- Edit Tank ----------
+  // ==========================================================
+  // EDIT TANK (single, correct, includes delete button)
+  // ==========================================================
   Future<void> _openEditTank() async {
-    final name = TextEditingController(text: widget.tank.name);
+    final supa = Supabase.instance.client;
 
-    final initialLiters = widget.tank.volumeLiters;
-    final initialDisplayVol =
-        _useGallons ? widget.tank.volumeGallons : initialLiters;
-    final vol = TextEditingController(
-      text: initialDisplayVol.toStringAsFixed(0),
-    );
+    // 1) Pull freshest values from DB
+    final row = await supa
+        .from('tanks')
+        .select(
+          'name, volume_liters, volume_gallons, water_type, image_url, '
+          'ideal_temp_min, ideal_temp_max, ideal_ph_min, ideal_ph_max, '
+          'ideal_tds_min, ideal_tds_max',
+        )
+        .eq('id', widget.tank.id)
+        .maybeSingle();
 
-    String water = widget.tank.waterType ?? 'freshwater';
-    String? imageUrl = widget.tank.imageUrl;
+    final dbName = (row?['name'] as String?) ?? widget.tank.name;
+    final dbLiters =
+        (row?['volume_liters'] as num?)?.toDouble() ?? widget.tank.volumeLiters;
+    final dbGallons = (row?['volume_gallons'] as num?)?.toDouble() ??
+        (dbLiters / 3.785411784);
+    final dbWater =
+        (row?['water_type'] as String?) ?? (widget.tank.waterType ?? 'freshwater');
+    final dbImageUrl = (row?['image_url'] as String?) ?? widget.tank.imageUrl;
 
-    final currentTMinC = widget.tank.idealTempMin ?? 0;
-    final currentTMaxC = widget.tank.idealTempMax ?? 100;
+    // Temps stored as °F
+    final currentTMinF = ((row?['ideal_temp_min'] as num?)?.toDouble()) ??
+        (widget.tank.idealTempMin ?? _defaultIdealTempMinF);
+    final currentTMaxF = ((row?['ideal_temp_max'] as num?)?.toDouble()) ??
+        (widget.tank.idealTempMax ?? _defaultIdealTempMaxF);
 
-    final displayTMin =
-        _useFahrenheit ? _cToF(currentTMinC) : currentTMinC;
-    final displayTMax =
-        _useFahrenheit ? _cToF(currentTMaxC) : currentTMaxC;
+    final currentPhMin = ((row?['ideal_ph_min'] as num?)?.toDouble()) ??
+        (widget.tank.idealPhMin ?? _defaultIdealPhMin);
+    final currentPhMax = ((row?['ideal_ph_max'] as num?)?.toDouble()) ??
+        (widget.tank.idealPhMax ?? _defaultIdealPhMax);
 
-    final tMin = TextEditingController(
-      text: displayTMin.toStringAsFixed(1),
-    );
-    final tMax = TextEditingController(
-      text: displayTMax.toStringAsFixed(1),
-    );
-    final pMin = TextEditingController(
-      text: (widget.tank.idealPhMin ?? 0).toString(),
-    );
-    final pMax = TextEditingController(
-      text: (widget.tank.idealPhMax ?? 14).toString(),
-    );
-    final dMin = TextEditingController(
-      text: (widget.tank.idealTdsMin ?? 0).toString(),
-    );
-    final dMax = TextEditingController(
-      text: (widget.tank.idealTdsMax ?? 5000).toString(),
-    );
+    final currentTdsMin = ((row?['ideal_tds_min'] as num?)?.toDouble()) ??
+        (widget.tank.idealTdsMin ?? _defaultIdealTdsMin);
+    final currentTdsMax = ((row?['ideal_tds_max'] as num?)?.toDouble()) ??
+        (widget.tank.idealTdsMax ?? _defaultIdealTdsMax);
+
+    final name = TextEditingController(text: dbName);
+
+    final initialDisplayVol = _useGallons ? dbGallons : dbLiters;
+    final vol = TextEditingController(text: initialDisplayVol.toStringAsFixed(0));
+
+    String water = dbWater;
+    String? imageUrl = dbImageUrl;
+
+    final displayTMin = _useFahrenheit ? currentTMinF : _fToC(currentTMinF);
+    final displayTMax = _useFahrenheit ? currentTMaxF : _fToC(currentTMaxF);
+
+    final tMin = TextEditingController(text: displayTMin.toStringAsFixed(1));
+    final tMax = TextEditingController(text: displayTMax.toStringAsFixed(1));
+
+    final pMin = TextEditingController(text: currentPhMin.toString());
+    final pMax = TextEditingController(text: currentPhMax.toString());
+    final dMin = TextEditingController(text: currentTdsMin.toString());
+    final dMax = TextEditingController(text: currentTdsMax.toString());
 
     final tempUnit = _useFahrenheit ? '°F' : '°C';
     final volumeLabel = _useGallons ? 'Volume (gal)' : 'Volume (L)';
@@ -2113,8 +1868,21 @@ Widget _buildTasks(Color card) {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
-            final hasImage =
-                (imageUrl != null && imageUrl!.trim().isNotEmpty);
+            final hasImage = (imageUrl != null && imageUrl!.trim().isNotEmpty);
+
+            Future<void> handleDelete() async {
+              final deleted = await _confirmAndDeleteTank();
+              if (!deleted) return;
+
+              if (!mounted) return;
+
+              // Close sheet
+              Navigator.pop(ctx, false);
+
+              // Leave detail page (tank gone)
+              Navigator.pop(context, true);
+            }
+
             return Padding(
               padding: EdgeInsets.only(
                 left: 16,
@@ -2137,28 +1905,18 @@ Widget _buildTasks(Color card) {
                     Row(
                       children: [
                         CircleAvatar(
-                          radius: 28,
-                          backgroundColor: Colors.grey.shade700,
-                          backgroundImage:
-                              hasImage ? NetworkImage(imageUrl!) : null,
-                          child: hasImage
-                              ? null
-                              : const Icon(
-                                  Icons.water_drop,
-                                  color: Colors.white,
-                                ),
-                        ),
+  radius: 28,
+  backgroundColor: Colors.grey.shade700,
+  backgroundImage: hasImage ? NetworkImage(imageUrl!) : null,
+  child: hasImage ? null : _logoAvatarFallback(size: 56),
+),
+
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton.icon(
                             onPressed: () async {
-                              final newUrl =
-                                  await _pickAndUploadProfileImage(
-                                widget.tank.id,
-                              );
-                              if (newUrl != null) {
-                                setSheet(() => imageUrl = newUrl);
-                              }
+                              final newUrl = await _pickAndUploadProfileImage(widget.tank.id);
+                              if (newUrl != null) setSheet(() => imageUrl = newUrl);
                             },
                             icon: const Icon(Icons.photo_camera),
                             label: const Text('Change profile photo'),
@@ -2169,11 +1927,7 @@ Widget _buildTasks(Color card) {
                     const SizedBox(height: 14),
                     _txt('Name', name),
                     const SizedBox(height: 10),
-                    _txt(
-                      volumeLabel,
-                      vol,
-                      keyboard: TextInputType.number,
-                    ),
+                    _txt(volumeLabel, vol, keyboard: TextInputType.number),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       value: water,
@@ -2183,91 +1937,43 @@ Widget _buildTasks(Color card) {
                         border: OutlineInputBorder(),
                       ),
                       items: const [
-                        DropdownMenuItem(
-                          value: 'freshwater',
-                          child: Text('Freshwater'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'saltwater',
-                          child: Text('Saltwater'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'brackish',
-                          child: Text('Brackish'),
-                        ),
+                        DropdownMenuItem(value: 'freshwater', child: Text('Freshwater')),
+                        DropdownMenuItem(value: 'saltwater', child: Text('Saltwater')),
+                        DropdownMenuItem(value: 'brackish', child: Text('Brackish')),
                       ],
-                      onChanged: (v) =>
-                          setSheet(() => water = v ?? 'freshwater'),
+                      onChanged: (v) => setSheet(() => water = v ?? 'freshwater'),
                     ),
                     const SizedBox(height: 16),
                     const Align(
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Ideal ranges',
-                        style: TextStyle(color: Colors.white70),
-                      ),
+                      child: Text('Ideal ranges', style: TextStyle(color: Colors.white70)),
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Expanded(
-                          child: _txt(
-                            'Temp min ($tempUnit)',
-                            tMin,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('Temp min ($tempUnit)', tMin, keyboard: TextInputType.number)),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: _txt(
-                            'Temp max ($tempUnit)',
-                            tMax,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('Temp max ($tempUnit)', tMax, keyboard: TextInputType.number)),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Expanded(
-                          child: _txt(
-                            'pH min',
-                            pMin,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('pH min', pMin, keyboard: TextInputType.number)),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: _txt(
-                            'pH max',
-                            pMax,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('pH max', pMax, keyboard: TextInputType.number)),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Expanded(
-                          child: _txt(
-                            'TDS min',
-                            dMin,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('TDS min', dMin, keyboard: TextInputType.number)),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: _txt(
-                            'TDS max',
-                            dMax,
-                            keyboard: TextInputType.number,
-                          ),
-                        ),
+                        Expanded(child: _txt('TDS max', dMax, keyboard: TextInputType.number)),
                       ],
                     ),
                     const SizedBox(height: 20),
+
                     Row(
                       children: [
                         Expanded(
@@ -2285,6 +1991,31 @@ Widget _buildTasks(Color card) {
                         ),
                       ],
                     ),
+
+                    const SizedBox(height: 12),
+
+                    SizedBox(
+  width: double.infinity,
+  child: FilledButton.icon(
+    style: FilledButton.styleFrom(
+      backgroundColor: _kDanger,
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+    ),
+    icon: const Icon(Icons.delete_forever),
+    label: const Text(
+      'Delete tank',
+      style: TextStyle(
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+    onPressed: handleDelete,
+  ),
+),
+
                   ],
                 ),
               ),
@@ -2294,74 +2025,145 @@ Widget _buildTasks(Color card) {
       },
     );
 
-    if (ok == true) {
+    if (ok != true) return;
+
+    // Save back to DB (temps stored in °F)
+    final volText = vol.text.trim();
+    final parsedVol = double.tryParse(volText);
+    final displayVol = parsedVol ?? initialDisplayVol;
+
+    final gallons = _useGallons ? displayVol : (displayVol / 3.785411784);
+    final liters = _useGallons ? (gallons * 3.785411784) : displayVol;
+
+    double? idealTempMinF;
+    double? idealTempMaxF;
+
+    final parsedTMin = double.tryParse(tMin.text.trim());
+    final parsedTMax = double.tryParse(tMax.text.trim());
+
+    if (parsedTMin != null) {
+      idealTempMinF = _useFahrenheit ? parsedTMin : _cToF(parsedTMin);
+    }
+    if (parsedTMax != null) {
+      idealTempMaxF = _useFahrenheit ? parsedTMax : _cToF(parsedTMax);
+    }
+
+    await supa.from('tanks').update({
+      'name': name.text.trim(),
+      'volume_liters': liters,
+      'volume_gallons': gallons,
+      'water_type': water,
+      'image_url': imageUrl?.trim(),
+      'ideal_temp_min': idealTempMinF,
+      'ideal_temp_max': idealTempMaxF,
+      'ideal_ph_min': double.tryParse(pMin.text.trim()) ?? _defaultIdealPhMin,
+      'ideal_ph_max': double.tryParse(pMax.text.trim()) ?? _defaultIdealPhMax,
+      'ideal_tds_min': double.tryParse(dMin.text.trim()) ?? _defaultIdealTdsMin,
+      'ideal_tds_max': double.tryParse(dMax.text.trim()) ?? _defaultIdealTdsMax,
+    }).eq('id', widget.tank.id);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Tank updated')));
+
+    setState(() {
+      widget.tank.name = name.text.trim();
+      widget.tank.volumeLiters = liters;
+      widget.tank.waterType = water;
+      widget.tank.imageUrl = imageUrl?.trim();
+      widget.tank.idealTempMin = idealTempMinF;
+      widget.tank.idealTempMax = idealTempMaxF;
+      widget.tank.idealPhMin =
+          double.tryParse(pMin.text.trim()) ?? _defaultIdealPhMin;
+      widget.tank.idealPhMax =
+          double.tryParse(pMax.text.trim()) ?? _defaultIdealPhMax;
+      widget.tank.idealTdsMin =
+          double.tryParse(dMin.text.trim()) ?? _defaultIdealTdsMin;
+      widget.tank.idealTdsMax =
+          double.tryParse(dMax.text.trim()) ?? _defaultIdealTdsMax;
+    });
+
+    await _loadMeasurements();
+    if (mounted) setState(() {});
+  }
+
+  /// Confirmation + cascade delete for a tank (DB rows + storage).
+  /// Returns true if deleted.
+  Future<bool> _confirmAndDeleteTank() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Delete tank?'),
+        content: const Text(
+          'This will permanently delete this tank, its readings, notes, photos, and tasks. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return false;
+
+    try {
       final supa = Supabase.instance.client;
+      final tankId = widget.tank.id;
 
-      final volText = vol.text.trim();
-      final parsedVol = double.tryParse(volText);
-      final displayVol =
-          parsedVol == null ? initialDisplayVol : parsedVol;
+      // 1) tasks first (FK)
+      await supa.from('tank_tasks').delete().eq('tank_id', tankId);
 
-      final gallons = _useGallons
-          ? displayVol
-          : displayVol / 3.785411784;
-      final liters = _useGallons
-          ? gallons * 3.785411784
-          : displayVol;
+      // 2) readings
+      await supa.from('sensor_readings').delete().eq('tank_id', tankId);
 
-      double? idealTempMinC;
-      double? idealTempMaxC;
+      // 3) notes + photos (delete storage first)
+      final noteRows = await supa.from('tank_notes').select('id').eq('tank_id', tankId);
+      final noteIds = (noteRows as List)
+          .map((r) => r['id'] as String?)
+          .whereType<String>()
+          .toList();
 
-      final tMinText = tMin.text.trim();
-      final tMaxText = tMax.text.trim();
+      if (noteIds.isNotEmpty) {
+        final photoRows = await supa
+            .from('tank_note_photos')
+            .select('storage_path')
+            .inFilter('note_id', noteIds);
 
-      final parsedTMin = double.tryParse(tMinText);
-      final parsedTMax = double.tryParse(tMaxText);
+        final paths = (photoRows as List)
+            .map((r) => (r['storage_path'] as String?) ?? '')
+            .where((p) => p.trim().isNotEmpty)
+            .toList();
 
-      if (parsedTMin != null) {
-        idealTempMinC =
-            _useFahrenheit ? _fToC(parsedTMin) : parsedTMin;
+        if (paths.isNotEmpty) {
+          await supa.storage.from('tank-notes').remove(paths);
+        }
+
+        await supa.from('tank_note_photos').delete().inFilter('note_id', noteIds);
+        await supa.from('tank_notes').delete().eq('tank_id', tankId);
       }
 
-      if (parsedTMax != null) {
-        idealTempMaxC =
-            _useFahrenheit ? _fToC(parsedTMax) : parsedTMax;
-      }
+      // 4) finally delete tank
+      await supa.from('tanks').delete().eq('id', tankId);
 
-      await supa
-          .from('tanks')
-          .update({
-            'name': name.text.trim(),
-            'volume_liters': liters,
-            'volume_gallons': gallons,
-            'water_type': water,
-            'image_url': imageUrl?.trim(),
-            'ideal_temp_min': idealTempMinC,
-            'ideal_temp_max': idealTempMaxC,
-            'ideal_ph_min': double.tryParse(pMin.text.trim()),
-            'ideal_ph_max': double.tryParse(pMax.text.trim()),
-            'ideal_tds_min': double.tryParse(dMin.text.trim()),
-            'ideal_tds_max': double.tryParse(dMax.text.trim()),
-          })
-          .eq('id', widget.tank.id);
-
-      if (!mounted) return;
+      if (!mounted) return true;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tank updated')),
+        SnackBar(content: Text('Deleted tank "${widget.tank.name}"')),
       );
-
-      setState(() {
-        widget.tank.name = name.text.trim();
-        widget.tank.volumeLiters = liters;
-        widget.tank.waterType = water;
-        widget.tank.imageUrl = imageUrl?.trim();
-        widget.tank.idealTempMin = idealTempMinC;
-        widget.tank.idealTempMax = idealTempMaxC;
-        widget.tank.idealPhMin = double.tryParse(pMin.text.trim());
-        widget.tank.idealPhMax = double.tryParse(pMax.text.trim());
-        widget.tank.idealTdsMin = double.tryParse(dMin.text.trim());
-        widget.tank.idealTdsMax = double.tryParse(dMax.text.trim());
-      });
+      return true;
+    } catch (e, st) {
+      debugPrint('Delete tank failed: $e\n$st');
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Delete failed: $e')),
+      );
+      return false;
     }
   }
 
@@ -2399,12 +2201,8 @@ Widget _buildTasks(Color card) {
     var diff = DateTime.now().difference(latest);
     if (diff.isNegative) diff = Duration.zero;
     if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) {
-      return '${diff.inMinutes}m ago';
-    }
-    if (diff.inHours < 24) {
-      return '${diff.inHours}h ago';
-    }
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
 
@@ -2414,25 +2212,19 @@ Widget _buildTasks(Color card) {
         _ => 'Freshwater',
       };
 
-  String _labelForParam(ParamType t) => t == ParamType.temperature
-      ? 'Temperature'
-      : t == ParamType.ph
-          ? 'pH'
-          : 'TDS';
+  String _labelForParam(ParamType t) =>
+      t == ParamType.temperature ? 'Temperature' : t == ParamType.ph ? 'pH' : 'TDS';
 
   String _formatRange(RangeValues r) =>
       '${r.start.toStringAsFixed(1)} to ${r.end.toStringAsFixed(1)}';
 
   String _formatValue(ParameterReading r) {
-    if (r.type == ParamType.ph) {
-      return r.value.toStringAsFixed(2);
-    }
-    if (r.type == ParamType.tds) {
-      return r.value.toStringAsFixed(0);
-    }
+    if (r.type == ParamType.ph) return r.value.toStringAsFixed(2);
+    if (r.type == ParamType.tds) return r.value.toStringAsFixed(0);
     return r.value.toStringAsFixed(1);
   }
 
+  // FIXED: correct Supabase Storage upload usage (no uploadBinary nonsense)
   Future<String?> _pickAndUploadProfileImage(String tankId) async {
     try {
       final picker = ImagePicker();
@@ -2447,21 +2239,18 @@ Widget _buildTasks(Color card) {
       final ext = xfile.path.split('.').last.toLowerCase();
       final path = '$uid/tanks/$tankId/profile_$id.$ext';
 
-      await Supabase.instance.client.storage
-          .from('tank-images')
-          .upload(
+      await Supabase.instance.client.storage.from('tank-images').upload(
             path,
             File(xfile.path),
             fileOptions: const FileOptions(upsert: true),
           );
-      return Supabase.instance.client.storage
-          .from('tank-images')
-          .getPublicUrl(path);
-    } catch (e) {
+
+      return Supabase.instance.client.storage.from('tank-images').getPublicUrl(path);
+    } catch (e, st) {
+      debugPrint('Upload failed: $e\n$st');
       if (!mounted) return null;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload failed: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Upload failed: $e')));
       return null;
     }
   }
@@ -2513,6 +2302,7 @@ class MeasurePoint {
     this.tds,
     this.deviceUid,
   });
+
   final String id;
   final DateTime at;
   final double? tempC;
@@ -2541,6 +2331,7 @@ class NotePhoto {
   final String id;
   final String storagePath;
   final String publicUrl;
+
   NotePhoto({
     required this.id,
     required this.storagePath,
@@ -2548,7 +2339,7 @@ class NotePhoto {
   });
 
   factory NotePhoto.fromRow(Map<String, dynamic> r) => NotePhoto(
-        id: r['id'] ?? const Uuid().v4(),
+        id: (r['id'] as String?) ?? const Uuid().v4(),
         storagePath: r['storage_path'],
         publicUrl: r['public_url'],
       );
@@ -2562,6 +2353,7 @@ class NoteItem {
   final DateTime? updatedAt;
   final String userId;
   final List<NotePhoto> photos;
+
   NoteItem({
     required this.id,
     required this.title,
@@ -2593,6 +2385,7 @@ class TaskItem {
   final bool done;
   final DateTime? due;
   final String? readingId;
+
   TaskItem({
     required this.id,
     required this.title,
@@ -2605,9 +2398,7 @@ class TaskItem {
         id: r['id'],
         title: r['title'],
         done: r['done'] == true,
-        due: r['due_at'] == null
-            ? null
-            : DateTime.parse(r['due_at']).toLocal(),
+        due: r['due_at'] == null ? null : DateTime.parse(r['due_at']).toLocal(),
         readingId: r['reading_id'],
       );
 }
@@ -2632,12 +2423,11 @@ class _MiniParameterCard extends StatelessWidget {
     final fg = selected ? Colors.white : color;
     final labelColor = Colors.white70;
 
-    final valueStr =
-        reading.value % 1 == 0
-            ? reading.value.toInt().toString()
-            : reading.type == ParamType.ph
-                ? reading.value.toStringAsFixed(2)
-                : reading.value.toStringAsFixed(1);
+    final valueStr = reading.value % 1 == 0
+        ? reading.value.toInt().toString()
+        : reading.type == ParamType.ph
+            ? reading.value.toStringAsFixed(2)
+            : reading.value.toStringAsFixed(1);
 
     return Stack(
       children: [
@@ -2646,10 +2436,7 @@ class _MiniParameterCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: fg.withOpacity(0.9),
-              width: 1.2,
-            ),
+            border: Border.all(color: fg.withOpacity(0.9), width: 1.2),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2674,11 +2461,7 @@ class _MiniParameterCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '$valueStr ${reading.unit}',
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: fg, fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -2690,19 +2473,9 @@ class _MiniParameterCard extends StatelessWidget {
             child: Container(
               width: 18,
               height: 18,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE74C3C),
-                shape: BoxShape.circle,
-              ),
+              decoration: const BoxDecoration(color: Color(0xFFE74C3C), shape: BoxShape.circle),
               child: const Center(
-                child: Text(
-                  '!',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    height: 1,
-                  ),
-                ),
+                child: Text('!', style: TextStyle(color: Colors.white, fontSize: 12, height: 1)),
               ),
             ),
           ),

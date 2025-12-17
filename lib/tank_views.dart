@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../tank_detail_page.dart';
+import '../app_settings.dart';
 
 /// Shared label helper
 String _labelForWaterType(String v) {
@@ -62,8 +63,7 @@ class TankCard extends StatelessWidget {
           children: [
             // image
             ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               child: (imageUrl != null && imageUrl.isNotEmpty)
                   ? Image.network(
                       imageUrl,
@@ -172,9 +172,17 @@ class TankListTile extends StatelessWidget {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '${_labelForWaterType(waterType)} • ${gallons.toStringAsFixed(0)} gal',
-                style: const TextStyle(color: Colors.white70),
+              ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useGallons,
+                builder: (context, useGallons, _) {
+                  final volText = useGallons
+                      ? '${gallons.toStringAsFixed(0)} gal'
+                      : '${liters.toStringAsFixed(0)} L';
+                  return Text(
+                    '${_labelForWaterType(waterType)} • $volText',
+                    style: const TextStyle(color: Colors.white70),
+                  );
+                },
               ),
               const SizedBox(height: 4),
               LatestParams(
@@ -239,8 +247,7 @@ class TankGridCard extends StatelessWidget {
           children: [
             // taller image to keep aspect pleasant in grid
             ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(14)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
               child: (imageUrl != null && imageUrl.isNotEmpty)
                   ? Image.network(
                       imageUrl,
@@ -267,11 +274,19 @@ class TankGridCard extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text(
-                '${_labelForWaterType(waterType)} • ${gallons.toStringAsFixed(0)} gal',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useGallons,
+                builder: (context, useGallons, _) {
+                  final volText = useGallons
+                      ? '${gallons.toStringAsFixed(0)} gal'
+                      : '${liters.toStringAsFixed(0)} L';
+                  return Text(
+                    '${_labelForWaterType(waterType)} • $volText',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  );
+                },
               ),
             ),
             const SizedBox(height: 6),
@@ -355,8 +370,10 @@ class LatestParams extends StatelessWidget {
         String when = '';
 
         if (m != null) {
-          // Always treat stored temperature as Celsius
-          tempC = _asDouble(m['temperature']);
+          // DB stores temperature in Fahrenheit (AquaSpec device writes °F)
+          final tempF = _asDouble(m['temperature']);
+          tempC = tempF == null ? null : (tempF - 32) * 5 / 9;
+
           ph = _asDouble(m['ph']);
           tds = _asDouble(m['tds']);
           final dt = DateTime.tryParse(m['recorded_at']?.toString() ?? '');
@@ -452,8 +469,7 @@ class LatestParams extends StatelessWidget {
                   child: _iconTile(
                     icon: Icons.bubble_chart,
                     label: 'TDS',
-                    value:
-                        tds == null ? '-' : '${tds.toStringAsFixed(0)} ppm',
+                    value: tds == null ? '-' : '${tds.toStringAsFixed(0)} ppm',
                     color: _kTdsPurple,
                   ),
                 ),
@@ -503,8 +519,7 @@ class LatestParams extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style:
-                      const TextStyle(color: Colors.white70, fontSize: 11),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
                 const SizedBox(height: 2),
                 Text(

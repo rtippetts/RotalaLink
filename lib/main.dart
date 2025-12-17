@@ -69,7 +69,7 @@ class _MyAppState extends State<MyApp> {
       title: 'RotalaLink',
       theme: aquaTheme(light),
       darkTheme: aquaTheme(dark),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       home: RootRouter(), // 👈 route based on session
     );
   }
