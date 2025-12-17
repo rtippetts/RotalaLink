@@ -37,17 +37,40 @@ class _AppScaffoldState extends State<AppScaffold> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _bleSheetOpen = false;
 
+  /// On your current firmware, the device advertises as "AquaSpec"
+  /// and does NOT expose a separate hardware UID over BLE.
+  ///
+  /// So the only stable identifier the app has is the BLE `DiscoveredDevice.id`.
+  /// We'll treat that as `devices.device_uid` in Supabase.
+  ///
+  /// IMPORTANT: This requires `public.devices.device_uid` to contain this value
+  /// (we'll upsert it from the app below).
+  String _deviceUidFromDiscovered(DiscoveredDevice d) {
+    return d.id.trim();
+  }
+
+  /// Ensures a row exists in public.devices for this device_uid.
+  /// This prevents FK violations when writing user_devices.
+  ///
+  /// If your RLS blocks inserts into devices from the client,
+  /// you'll get a PostgrestException and we surface a clear message.
+  Future<void> _ensureDeviceExists(String deviceUid) async {
+    final client = Supabase.instance.client;
+
+    if (deviceUid.trim().isEmpty) return;
+
+    await client.from('devices').upsert(
+      {'device_uid': deviceUid},
+      onConflict: 'device_uid',
+    );
+  }
+
   Future<void> _linkDeviceToUser(String deviceUid) async {
     final client = Supabase.instance.client;
     final uid = client.auth.currentUser?.id;
 
     if (uid == null) return;
     if (deviceUid.trim().isEmpty) return;
-
-    // Important:
-    // Do not write to public.devices from the client.
-    // Many setups keep devices as a global registry locked behind RLS.
-    // The client should only write the relationship row in user_devices.
 
     await client.from('user_devices').upsert(
       {
@@ -329,6 +352,25 @@ class _AppScaffoldState extends State<AppScaffold> {
           }
 
           final userId = Supabase.instance.client.auth.currentUser?.id ?? '';
+          final deviceUid = selected == null ? '' : _deviceUidFromDiscovered(selected!);
+
+          if (userId.isEmpty) {
+            setSheet(() {
+              step = _BleSheetStep.failure;
+              status = 'Not signed in';
+              errorMsg = 'Please log in again and retry.';
+            });
+            return;
+          }
+
+          if (deviceUid.isEmpty) {
+            setSheet(() {
+              step = _BleSheetStep.failure;
+              status = 'Device ID missing';
+              errorMsg = 'Could not determine device identifier.';
+            });
+            return;
+          }
 
           setSheet(() {
             busy = true;
@@ -338,10 +380,13 @@ class _AppScaffoldState extends State<AppScaffold> {
           });
 
           try {
-            final msg = 'PROVISION:$ssid|$pass|$userId||||';
+            // Firmware expects: ssid|pass|userId|duid|supabaseUrl|supabaseKey
+            // Your firmware currently only reads first 3, but we include duid for future use.
+            final msg = 'PROVISION:$ssid|$pass|$userId|$deviceUid||';
             await ble.writeUtf8(msg);
 
-            final deviceUid = selected?.id ?? '';
+            // Fix FK violation by ensuring devices row exists before linking.
+            await _ensureDeviceExists(deviceUid);
             await _linkDeviceToUser(deviceUid);
 
             setSheet(() {
@@ -361,13 +406,35 @@ class _AppScaffoldState extends State<AppScaffold> {
 
             _goTab(0);
           } on PostgrestException catch (e) {
-            // Most common failure now is FK violation if devices row does not exist.
-            // If that happens, you should ensure the AquaSpec registers itself into public.devices using service role.
+            final msg = e.message.toLowerCase();
+
+            // Helpful guidance for the two most common cases:
+            // 1) FK violation -> devices row missing (should be fixed by _ensureDeviceExists)
+            // 2) RLS/permission denied -> you need an insert policy or Edge Function
+            String friendly = e.message;
+
+            if (msg.contains('row-level security') ||
+                msg.contains('permission denied') ||
+                msg.contains('not allowed')) {
+              friendly =
+                  'Supabase blocked creating the device registry row (RLS).\n\n'
+                  'Quick fix: add an insert policy on public.devices for authenticated users, '
+                  'or create an Edge Function to register devices with service role.\n\n'
+                  'Original: ${e.message}';
+            } else if (msg.contains('foreign key') || msg.contains('violates foreign key')) {
+              friendly =
+                  'Device link failed because the device is not registered in public.devices.\n\n'
+                  'This app now tries to auto-create it, but if RLS blocks it you need either:\n'
+                  '• a public.devices insert policy, or\n'
+                  '• an Edge Function that creates devices + links user_devices.\n\n'
+                  'Original: ${e.message}';
+            }
+
             setSheet(() {
               busy = false;
               step = _BleSheetStep.failure;
               status = 'Send failed';
-              errorMsg = e.message;
+              errorMsg = friendly;
             });
           } catch (e) {
             setSheet(() {
@@ -495,9 +562,9 @@ class _AppScaffoldState extends State<AppScaffold> {
                 child: ListTile(
                   leading: const Icon(Icons.bluetooth_connected, color: Colors.tealAccent),
                   title: Text(deviceName, style: const TextStyle(color: Colors.white)),
-                  subtitle: const Text(
-                    'Connected',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  subtitle: Text(
+                    'Connected • ${selected == null ? '' : _deviceUidFromDiscovered(selected!)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                 ),
               ),
