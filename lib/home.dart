@@ -61,6 +61,9 @@ class _HomePageState extends State<HomePage> {
 
   bool _retryingTanks = false;
 
+  // Pull-to-refresh tick to force rebuild if needed
+  int _refreshTick = 0;
+
   final _picker = ImagePicker();
   Uint8List? _pendingImageBytes;
   String? _pendingImageName;
@@ -85,8 +88,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
 
-    _tankStream =
-        _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
+    _tankStream = _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
 
     _searchCtrl.addListener(() => setState(() {}));
 
@@ -121,52 +123,47 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
- static const double _kPillRadius = 18;
+  static const double _kPillRadius = 18;
 
-InputDecoration _pillDeco(String label, {String? helper}) {
-  final r = BorderRadius.circular(_kPillRadius);
+  InputDecoration _pillDeco(String label, {String? helper}) {
+    final r = BorderRadius.circular(_kPillRadius);
 
-  OutlineInputBorder none() => OutlineInputBorder(
-        borderRadius: r,
-        borderSide: BorderSide.none, // <-- no gray outline when unfocused
-      );
+    OutlineInputBorder none() => OutlineInputBorder(
+          borderRadius: r,
+          borderSide: BorderSide.none, // no gray outline when unfocused
+        );
 
-  OutlineInputBorder teal() => OutlineInputBorder(
-        borderRadius: r,
-        borderSide: const BorderSide(color: Colors.tealAccent, width: 1.2),
-      );
+    OutlineInputBorder teal() => OutlineInputBorder(
+          borderRadius: r,
+          borderSide: const BorderSide(color: Colors.tealAccent, width: 1.2),
+        );
 
-  OutlineInputBorder err() => OutlineInputBorder(
-        borderRadius: r,
-        borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
-      );
+    OutlineInputBorder err() => OutlineInputBorder(
+          borderRadius: r,
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
+        );
 
-  return InputDecoration(
-    labelText: label,
-    labelStyle: const TextStyle(color: Colors.white70),
-    helperText: helper,
-    helperStyle: const TextStyle(color: Colors.white38),
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white70),
+      helperText: helper,
+      helperStyle: const TextStyle(color: Colors.white38),
+      filled: true,
+      fillColor: const Color(0xFF0b1220),
 
-    filled: true,
-    fillColor: const Color(0xFF0b1220),
+      border: none(),
+      enabledBorder: none(),
+      disabledBorder: none(),
 
-    // IMPORTANT: force rounded shape even when unfocused
-    border: none(),
-    enabledBorder: none(),
-    disabledBorder: none(),
+      focusedBorder: teal(),
 
-    // Keep teal outline when focused
-    focusedBorder: teal(),
+      errorBorder: err(),
+      focusedErrorBorder: err(),
 
-    // Keep rounded corners for error states too
-    errorBorder: err(),
-    focusedErrorBorder: err(),
-
-    isDense: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-  );
-}
-
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    );
+  }
 
   InputDecoration _rangeDeco(String label) => _pillDeco(label);
 
@@ -201,22 +198,37 @@ InputDecoration _pillDeco(String label, {String? helper}) {
     });
 
     try {
-      await _supa
-          .from('tanks')
-          .select('id')
-          .limit(1)
-          .timeout(const Duration(seconds: 4));
+      await _supa.from('tanks').select('id').limit(1).timeout(const Duration(seconds: 4));
     } on TimeoutException {
       if (!mounted) return;
       setState(() {
         _retryingTanks = false;
       });
+      return;
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _retryingTanks = false;
       });
+      return;
     }
+
+    if (!mounted) return;
+    setState(() {
+      _retryingTanks = false;
+    });
+  }
+
+  Future<void> _refreshHome() async {
+    await _retryLoadTanks();
+
+    // refresh other "non-stream" data that people expect to update
+    await _loadGlobalTasks();
+
+    if (!mounted) return;
+    setState(() {
+      _refreshTick++;
+    });
   }
 
   Future<void> _loadLayoutMode() async {
@@ -285,9 +297,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
               id: r['id'] as String,
               title: (r['title'] ?? '') as String,
               done: r['done'] == true,
-              due: r['due_at'] == null
-                  ? null
-                  : DateTime.parse(r['due_at']).toLocal(),
+              due: r['due_at'] == null ? null : DateTime.parse(r['due_at']).toLocal(),
               tankId: r['tank_id'] as String?,
             ),
           )
@@ -346,8 +356,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                 const SizedBox(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading:
-                      const Icon(Icons.edit_calendar, color: Colors.white70),
+                  leading: const Icon(Icons.edit_calendar, color: Colors.white70),
                   title: Text(
                     due == null ? 'No due date' : 'Due: ${_timeExactGlobal(due!)}',
                     style: const TextStyle(color: Colors.white),
@@ -448,8 +457,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
     final uid = _supa.auth.currentUser?.id;
     if (uid == null) return;
 
-    final tanks =
-        await _supa.from('tanks').select('id,name').order('created_at');
+    final tanks = await _supa.from('tanks').select('id,name').order('created_at');
 
     String? selectedTankId;
     final titleCtrl = TextEditingController();
@@ -556,8 +564,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                         'title': titleCtrl.text.trim(),
                         'tank_id': selectedTankId,
                         'done': false,
-                        if (dueDate != null)
-                          'due_at': dueDate!.toIso8601String(),
+                        if (dueDate != null) 'due_at': dueDate!.toIso8601String(),
                       });
 
                       if (context.mounted) Navigator.pop(ctx);
@@ -741,8 +748,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
 
     await _loadGlobalTasks();
 
-    final List<dynamic> tanks =
-        await _supa.from('tanks').select('id,name').order('created_at');
+    final List<dynamic> tanks = await _supa.from('tanks').select('id,name').order('created_at');
 
     _TaskFilter filter = _TaskFilter.open;
     String? selectedTankId;
@@ -784,8 +790,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                 }
 
                 if (selectedTankId != null) {
-                  visible =
-                      visible.where((t) => t.tankId == selectedTankId).toList();
+                  visible = visible.where((t) => t.tankId == selectedTankId).toList();
                 }
 
                 Widget body;
@@ -869,12 +874,9 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                               });
 
                               try {
-                                await Future.delayed(
-                                    const Duration(milliseconds: 220));
+                                await Future.delayed(const Duration(milliseconds: 220));
 
-                                await _supa
-                                    .from('tank_tasks')
-                                    .update({'done': v}).eq('id', t.id);
+                                await _supa.from('tank_tasks').update({'done': v}).eq('id', t.id);
 
                                 pendingToggles.remove(t.id);
 
@@ -883,22 +885,16 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                 ScaffoldMessenger.of(context).clearSnackBars();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text(v
-                                        ? 'Task marked complete'
-                                        : 'Task reopened'),
+                                    content: Text(v ? 'Task marked complete' : 'Task reopened'),
                                     duration: const Duration(seconds: 3),
                                     action: SnackBarAction(
                                       label: 'Undo',
                                       onPressed: () async {
                                         try {
-                                          await _supa
-                                              .from('tank_tasks')
-                                              .update({'done': !v})
-                                              .eq('id', t.id);
+                                          await _supa.from('tank_tasks').update({'done': !v}).eq('id', t.id);
                                           await refresh();
                                         } catch (e) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
+                                          ScaffoldMessenger.of(context).showSnackBar(
                                             SnackBar(
                                               content: Text('Could not undo: $e'),
                                               backgroundColor: Colors.redAccent,
@@ -936,8 +932,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                             ),
                             activeColor: Colors.teal,
                             secondary: PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert,
-                                  color: Colors.white70),
+                              icon: const Icon(Icons.more_vert, color: Colors.white70),
                               onSelected: (v) async {
                                 if (v == 'edit') {
                                   await _createOrEditGlobalTask(existing: t);
@@ -950,8 +945,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                               },
                               itemBuilder: (_) => const [
                                 PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                PopupMenuItem(
-                                    value: 'delete', child: Text('Delete')),
+                                PopupMenuItem(value: 'delete', child: Text('Delete')),
                               ],
                             ),
                           ),
@@ -1017,9 +1011,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                         ChoiceChip(
                           label: const Text('All'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.all
-                                ? Colors.black
-                                : Colors.white70,
+                            color: filter == _TaskFilter.all ? Colors.black : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.all,
                           selectedColor: Colors.tealAccent,
@@ -1033,9 +1025,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                         ChoiceChip(
                           label: const Text('Open'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.open
-                                ? Colors.black
-                                : Colors.white70,
+                            color: filter == _TaskFilter.open ? Colors.black : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.open,
                           selectedColor: Colors.tealAccent,
@@ -1049,9 +1039,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                         ChoiceChip(
                           label: const Text('Completed'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.completed
-                                ? Colors.black
-                                : Colors.white70,
+                            color: filter == _TaskFilter.completed ? Colors.black : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.completed,
                           selectedColor: Colors.tealAccent,
@@ -1088,18 +1076,13 @@ InputDecoration _pillDeco(String label, {String? helper}) {
     // Ideal ranges controllers
     final idealTempMinCtrl = TextEditingController();
     final idealTempMaxCtrl = TextEditingController();
-    final idealPhMinCtrl =
-        TextEditingController(text: _defaultIdealPhMin.toStringAsFixed(1));
-    final idealPhMaxCtrl =
-        TextEditingController(text: _defaultIdealPhMax.toStringAsFixed(1));
-    final idealTdsMinCtrl =
-        TextEditingController(text: _defaultIdealTdsMin.toStringAsFixed(0));
-    final idealTdsMaxCtrl =
-        TextEditingController(text: _defaultIdealTdsMax.toStringAsFixed(0));
+    final idealPhMinCtrl = TextEditingController(text: _defaultIdealPhMin.toStringAsFixed(1));
+    final idealPhMaxCtrl = TextEditingController(text: _defaultIdealPhMax.toStringAsFixed(1));
+    final idealTdsMinCtrl = TextEditingController(text: _defaultIdealTdsMin.toStringAsFixed(0));
+    final idealTdsMaxCtrl = TextEditingController(text: _defaultIdealTdsMax.toStringAsFixed(0));
 
     bool lastUseF = AppSettings.useFahrenheit.value;
 
-    // Default temp UI shows either C or F, but we store F in DB
     if (lastUseF) {
       idealTempMinCtrl.text = _cToF(_defaultIdealTempMinC).toStringAsFixed(0); // 32
       idealTempMaxCtrl.text = _cToF(_defaultIdealTempMaxC).toStringAsFixed(0); // 212
@@ -1110,7 +1093,6 @@ InputDecoration _pillDeco(String label, {String? helper}) {
 
     double? _tryD(TextEditingController c) => _tryParseDouble(c.text);
 
-    // Keep displayed values consistent if unit toggle changes while open
     void _syncTempFields(bool useF) {
       final minVal = _tryD(idealTempMinCtrl);
       final maxVal = _tryD(idealTempMaxCtrl);
@@ -1155,11 +1137,8 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                           lastUseF = useF;
                         }
 
-                        final volumeLabel =
-                            useGallons ? 'Volume (gallons)' : 'Volume (liters)';
-                        final volumeHelper = useGallons
-                            ? 'Enter tank size in gallons'
-                            : 'Enter tank size in liters';
+                        final volumeLabel = useGallons ? 'Volume (gallons)' : 'Volume (liters)';
+                        final volumeHelper = useGallons ? 'Enter tank size in gallons' : 'Enter tank size in liters';
                         final tempUnit = useF ? '°F' : '°C';
 
                         return SingleChildScrollView(
@@ -1177,7 +1156,6 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                               ),
                               const SizedBox(height: 14),
 
-                              // ✅ Photo moved to top
                               _sectionHeader(Icons.photo_camera_back, 'Photo (optional)'),
                               const SizedBox(height: 8),
                               Row(
@@ -1223,9 +1201,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                 controller: nameCtrl,
                                 style: const TextStyle(color: Colors.white),
                                 decoration: _pillDeco('Name'),
-                                validator: (v) => (v == null || v.trim().isEmpty)
-                                    ? 'Required'
-                                    : null,
+                                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                               ),
                               const SizedBox(height: 12),
 
@@ -1254,8 +1230,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
 
                               TextFormField(
                                 controller: volumeCtrl,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 style: const TextStyle(color: Colors.white),
                                 decoration: _pillDeco(volumeLabel, helper: volumeHelper),
                                 validator: (v) {
@@ -1277,8 +1252,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTempMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('Temp min ($tempUnit)'),
                                     ),
@@ -1287,8 +1261,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTempMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('Temp max ($tempUnit)'),
                                     ),
@@ -1302,8 +1275,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealPhMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('pH min'),
                                     ),
@@ -1312,8 +1284,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealPhMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('pH max'),
                                     ),
@@ -1327,8 +1298,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTdsMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('TDS min (ppm)'),
                                     ),
@@ -1337,8 +1307,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTdsMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(decimal: true),
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                       style: const TextStyle(color: Colors.white),
                                       decoration: _rangeDeco('TDS max (ppm)'),
                                     ),
@@ -1374,14 +1343,11 @@ InputDecoration _pillDeco(String label, {String? helper}) {
 
                                           String? imageUrl;
                                           if (_pendingImageBytes != null) {
-                                            imageUrl =
-                                                await _uploadTankImage(_pendingImageBytes!);
+                                            imageUrl = await _uploadTankImage(_pendingImageBytes!);
                                           }
 
-                                          final raw =
-                                              double.parse(volumeCtrl.text.trim());
-                                          final useGallonsNow =
-                                              AppSettings.useGallons.value;
+                                          final raw = double.parse(volumeCtrl.text.trim());
+                                          final useGallonsNow = AppSettings.useGallons.value;
 
                                           final double gallons;
                                           final double liters;
@@ -1394,16 +1360,11 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                             gallons = liters / 3.785411784;
                                           }
 
-                                          // Temps: STORE FAHRENHEIT
                                           final tMinDisplay = _tryD(idealTempMinCtrl);
                                           final tMaxDisplay = _tryD(idealTempMaxCtrl);
 
-                                          final idealTempMinF = tMinDisplay == null
-                                              ? null
-                                              : (useF ? tMinDisplay : _cToF(tMinDisplay));
-                                          final idealTempMaxF = tMaxDisplay == null
-                                              ? null
-                                              : (useF ? tMaxDisplay : _cToF(tMaxDisplay));
+                                          final idealTempMinF = tMinDisplay == null ? null : (useF ? tMinDisplay : _cToF(tMinDisplay));
+                                          final idealTempMaxF = tMaxDisplay == null ? null : (useF ? tMaxDisplay : _cToF(tMaxDisplay));
 
                                           await _supa.from('tanks').insert({
                                             'user_id': uid,
@@ -1412,7 +1373,6 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                             'volume_liters': liters,
                                             'volume_gallons': gallons,
                                             if (imageUrl != null) 'image_url': imageUrl,
-
                                             'ideal_temp_min': idealTempMinF,
                                             'ideal_temp_max': idealTempMaxF,
                                             'ideal_ph_min': _tryD(idealPhMinCtrl),
@@ -1462,8 +1422,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
 
   Future<void> _openManualEntrySheet() async {
     try {
-      final tanks =
-          await _supa.from('tanks').select('id,name').order('created_at');
+      final tanks = await _supa.from('tanks').select('id,name').order('created_at');
       if (!mounted) return;
 
       String? tankId = tanks.isNotEmpty ? tanks.first['id'] as String : null;
@@ -1520,15 +1479,13 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                     const SizedBox(height: 12),
                     TextField(
                       controller: phCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(labelText: 'pH'),
                     ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: tdsCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(labelText: 'TDS ppm'),
                     ),
                     const SizedBox(height: 8),
@@ -1538,10 +1495,8 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                         final unit = useFahrenheit ? '°F' : '°C';
                         return TextField(
                           controller: tempCtrl,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(decimal: true),
-                          decoration:
-                              InputDecoration(labelText: 'Temperature $unit'),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(labelText: 'Temperature $unit'),
                         );
                       },
                     ),
@@ -1555,25 +1510,17 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                 try {
                                   await _supa.from('sensor_readings').insert({
                                     'tank_id': tankId,
-                                    'recorded_at':
-                                        DateTime.now().toUtc().toIso8601String(),
+                                    'recorded_at': DateTime.now().toUtc().toIso8601String(),
                                     'device_uid': null,
-                                    if (phCtrl.text.trim().isNotEmpty)
-                                      'ph': double.tryParse(phCtrl.text.trim()),
-                                    if (tdsCtrl.text.trim().isNotEmpty)
-                                      'tds': double.tryParse(tdsCtrl.text.trim()),
+                                    if (phCtrl.text.trim().isNotEmpty) 'ph': double.tryParse(phCtrl.text.trim()),
+                                    if (tdsCtrl.text.trim().isNotEmpty) 'tds': double.tryParse(tdsCtrl.text.trim()),
                                     if (tempCtrl.text.trim().isNotEmpty)
                                       'temperature': (() {
-                                        final displayVal =
-                                            double.tryParse(tempCtrl.text.trim());
+                                        final displayVal = double.tryParse(tempCtrl.text.trim());
                                         if (displayVal == null) return null;
 
-                                        final useFahrenheitNow =
-                                            AppSettings.useFahrenheit.value;
-
-                                        return useFahrenheitNow
-                                            ? displayVal
-                                            : _cToF(displayVal);
+                                        final useFahrenheitNow = AppSettings.useFahrenheit.value;
+                                        return useFahrenheitNow ? displayVal : _cToF(displayVal);
                                       })(),
                                   });
 
@@ -1660,9 +1607,7 @@ InputDecoration _pillDeco(String label, {String? helper}) {
           ),
         );
 
-    final signed = await _supa.storage
-        .from('tank-images')
-        .createSignedUrl(path, 60 * 60 * 24 * 30);
+    final signed = await _supa.storage.from('tank-images').createSignedUrl(path, 60 * 60 * 24 * 30);
     return signed;
   }
 
@@ -1717,45 +1662,53 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: AppSettings.useFahrenheit,
-                    builder: (context, useFahrenheit, _) {
-                      return StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: _tankStream,
-                        builder: (context, snap) {
-                          if (snap.connectionState == ConnectionState.waiting &&
-                              !snap.hasData) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-
-                          if (snap.hasError &&
-                              (snap.data == null || (snap.data?.isEmpty ?? true))) {
-                            final msg = snap.error.toString();
-                            final isOffline = msg.contains('SocketException') ||
-                                msg.contains('Failed host lookup');
-
-                            if (_retryingTanks) {
-                              return Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const CircularProgressIndicator(),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      isOffline ? 'Reconnecting…' : 'Trying again…',
-                                      style:
-                                          const TextStyle(color: Colors.white70),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ),
+                  child: RefreshIndicator(
+                    color: Colors.tealAccent,
+                    backgroundColor: const Color(0xFF111827),
+                    onRefresh: _refreshHome,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: AppSettings.useFahrenheit,
+                      builder: (context, useFahrenheit, _) {
+                        return StreamBuilder<List<Map<String, dynamic>>>(
+                          key: ValueKey('tank_stream_$_refreshTick'),
+                          stream: _tankStream,
+                          builder: (context, snap) {
+                            if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+                              // needs to be scrollable for pull-to-refresh gesture
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: const [
+                                  SizedBox(height: 140),
+                                  Center(child: CircularProgressIndicator()),
+                                ],
                               );
                             }
 
-                            return Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                            if (snap.hasError && (snap.data == null || (snap.data?.isEmpty ?? true))) {
+                              final msg = snap.error.toString();
+                              final isOffline = msg.contains('SocketException') || msg.contains('Failed host lookup');
+
+                              if (_retryingTanks) {
+                                return ListView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  children: [
+                                    const SizedBox(height: 140),
+                                    const Center(child: CircularProgressIndicator()),
+                                    const SizedBox(height: 12),
+                                    Center(
+                                      child: Text(
+                                        isOffline ? 'Reconnecting…' : 'Trying again…',
+                                        style: const TextStyle(color: Colors.white70),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
                                 children: [
+                                  const SizedBox(height: 90),
                                   Icon(
                                     isOffline ? Icons.wifi_off : Icons.error_outline,
                                     color: Colors.white70,
@@ -1763,106 +1716,120 @@ InputDecoration _pillDeco(String label, {String? helper}) {
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
-                                    isOffline
-                                        ? 'Oops, looks like you are offline.'
-                                        : 'Something went wrong while loading tanks.',
-                                    style:
-                                        const TextStyle(color: Colors.white70),
+                                    isOffline ? 'Oops, looks like you are offline.' : 'Something went wrong while loading tanks.',
+                                    style: const TextStyle(color: Colors.white70),
                                     textAlign: TextAlign.center,
                                   ),
                                   const SizedBox(height: 8),
-                                  TextButton.icon(
-                                    onPressed: _retryLoadTanks,
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('Try again'),
+                                  Center(
+                                    child: TextButton.icon(
+                                      onPressed: _retryLoadTanks,
+                                      icon: const Icon(Icons.refresh),
+                                      label: const Text('Try again'),
+                                    ),
                                   ),
                                 ],
-                              ),
-                            );
-                          }
+                              );
+                            }
 
-                          final all = snap.data ?? const [];
+                            final all = snap.data ?? const [];
 
-                          if (_retryingTanks && all.isNotEmpty) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted) setState(() => _retryingTanks = false);
-                            });
-                          }
+                            if (_retryingTanks && all.isNotEmpty) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted) setState(() => _retryingTanks = false);
+                              });
+                            }
 
-                          final q = _searchCtrl.text.trim().toLowerCase();
-                          final tanks = q.isEmpty
-                              ? all
-                              : all.where((row) {
-                                  final name =
-                                      (row['name'] ?? '').toString().toLowerCase();
-                                  return name.contains(q);
-                                }).toList();
+                            final q = _searchCtrl.text.trim().toLowerCase();
+                            final tanks = q.isEmpty
+                                ? all
+                                : all.where((row) {
+                                    final name = (row['name'] ?? '').toString().toLowerCase();
+                                    return name.contains(q);
+                                  }).toList();
 
-                          if (tanks.isEmpty) {
-                            return Center(
-                              child: TextButton.icon(
-                                onPressed: _openAddTankSheet,
-                                icon: const Icon(Icons.add, color: Colors.white),
-                                label: const Text(
-                                  'Add your first tank',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            );
-                          }
+                            if (tanks.isEmpty) {
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: [
+                                  const SizedBox(height: 90),
+                                  Center(
+                                    child: TextButton.icon(
+                                      onPressed: _openAddTankSheet,
+                                      icon: const Icon(Icons.add, color: Colors.white),
+                                      label: const Text(
+                                        'Add your first tank',
+                                        style: TextStyle(color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
 
-                          if (_layout == LayoutMode.cards) {
-                            return PageView.builder(
-                              scrollDirection: Axis.vertical,
-                              controller: PageController(viewportFraction: 1.0),
-                              physics: tanks.length == 1
-                                  ? const NeverScrollableScrollPhysics()
-                                  : const PageScrollPhysics(),
-                              itemCount: tanks.length,
-                              itemBuilder: (_, i) => Padding(
-                                padding: EdgeInsets.only(
-                                  bottom: i == tanks.length - 1 ? 0 : 12,
-                                ),
-                                child: TankCard(
+                            if (_layout == LayoutMode.cards) {
+                              // PageView isn't "pull-to-refresh"-friendly, so wrap in a scrollable parent.
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: EdgeInsets.zero,
+                                children: [
+                                  SizedBox(
+                                    height: MediaQuery.of(context).size.height * 0.62,
+                                    child: PageView.builder(
+                                      scrollDirection: Axis.vertical,
+                                      controller: PageController(viewportFraction: 1.0),
+                                      physics: tanks.length == 1
+                                          ? const NeverScrollableScrollPhysics()
+                                          : const PageScrollPhysics(),
+                                      itemCount: tanks.length,
+                                      itemBuilder: (_, i) => Padding(
+                                        padding: EdgeInsets.only(
+                                          bottom: i == tanks.length - 1 ? 0 : 12,
+                                        ),
+                                        child: TankCard(
+                                          row: tanks[i],
+                                          onOpen: _openTankDetail,
+                                          useFahrenheit: useFahrenheit,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+
+                            if (_layout == LayoutMode.list) {
+                              return ListView.separated(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                itemCount: tanks.length,
+                                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                                itemBuilder: (_, i) => TankListTile(
                                   row: tanks[i],
                                   onOpen: _openTankDetail,
                                   useFahrenheit: useFahrenheit,
                                 ),
-                              ),
-                            );
-                          }
+                              );
+                            }
 
-                          if (_layout == LayoutMode.list) {
-                            return ListView.separated(
+                            return GridView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 0.75,
+                              ),
                               itemCount: tanks.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 12),
-                              itemBuilder: (_, i) => TankListTile(
+                              itemBuilder: (_, i) => TankGridCard(
                                 row: tanks[i],
                                 onOpen: _openTankDetail,
                                 useFahrenheit: useFahrenheit,
                               ),
                             );
-                          }
-
-                          return GridView.builder(
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                              childAspectRatio: 0.75,
-                            ),
-                            itemCount: tanks.length,
-                            itemBuilder: (_, i) => TankGridCard(
-                              row: tanks[i],
-                              onOpen: _openTankDetail,
-                              useFahrenheit: useFahrenheit,
-                            ),
-                          );
-                        },
-                      );
-                    },
+                          },
+                        );
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(height: 30),
