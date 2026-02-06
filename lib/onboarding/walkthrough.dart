@@ -21,8 +21,9 @@ class WalkthroughScreen extends StatefulWidget {
         final md = Map<String, dynamic>.from(user.userMetadata ?? {});
         if (md['walkthrough_seen'] != true) {
           md['walkthrough_seen'] = true;
-          await Supabase.instance.client.auth
-              .updateUser(UserAttributes(data: md));
+          await Supabase.instance.client.auth.updateUser(
+            UserAttributes(data: md),
+          );
         }
       } catch (_) {}
     }
@@ -57,7 +58,6 @@ class WalkthroughScreen extends StatefulWidget {
   State<WalkthroughScreen> createState() => _WalkthroughScreenState();
 }
 
-
 class _WalkthroughScreenState extends State<WalkthroughScreen> {
   final _controller = PageController();
   int _index = 0;
@@ -67,19 +67,13 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
       icon: MdiIcons.fishbowlOutline, // aquarium icon for Add tank
       title: 'Add your tanks',
       body:
-          'Create a tank for each aquarium with its name, size, and water type so RotalaLink can keep everything organized.',
-    ),
-    const _WTPage(
-      icon: Icons.bluetooth_connected,
-      title: 'Add your AquaSpec',
-      body:
-          'Use the Bluetooth connection button to pair your AquaSpec device and begin automatic testing.',
+          'Create a tank for each aquarium with its name, size, and water type so Rotala can keep everything organized.',
     ),
     const _WTPage(
       icon: Icons.add_chart,
-      title: 'Manually add readings',
+      title: 'Add parameter readings',
       body:
-          'No device yet? No worries. Log readings by hand to track pH, TDS, and temperature for each tank.',
+          'Track your tank chemistry by logging pH, TDS, and temperature for each tank.',
     ),
     const _WTPage(
       icon: Icons.add_task,
@@ -112,10 +106,7 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
         actions: [
           TextButton(
             onPressed: _finish,
-            child: const Text(
-              'Skip',
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text('Skip', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -134,25 +125,22 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
             _Dots(count: _pages.length, index: _index),
             const SizedBox(height: 12),
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
                 children: [
                   // Back arrow (disabled and faded on first page)
                   IconButton(
-                    onPressed: _index == 0
-                        ? null
-                        : () {
-                            _controller.previousPage(
-                              duration:
-                                  const Duration(milliseconds: 250),
-                              curve: Curves.easeOut,
-                            );
-                          },
+                    onPressed:
+                        _index == 0
+                            ? null
+                            : () {
+                              _controller.previousPage(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeOut,
+                              );
+                            },
                     icon: const Icon(Icons.arrow_back),
-                    color: _index == 0
-                        ? Colors.white24
-                        : RotalaColors.teal,
+                    color: _index == 0 ? Colors.white24 : RotalaColors.teal,
                   ),
                   const Spacer(),
                   Expanded(
@@ -160,15 +148,15 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
                       style: FilledButton.styleFrom(
                         backgroundColor: RotalaColors.teal,
                       ),
-                      onPressed: last
-                          ? _finish
-                          : () {
-                              _controller.nextPage(
-                                duration:
-                                    const Duration(milliseconds: 250),
-                                curve: Curves.easeOut,
-                              );
-                            },
+                      onPressed:
+                          last
+                              ? _finish
+                              : () {
+                                _controller.nextPage(
+                                  duration: const Duration(milliseconds: 250),
+                                  curve: Curves.easeOut,
+                                );
+                              },
                       child: Text(last ? 'Get started' : 'Next'),
                     ),
                   ),
@@ -184,11 +172,7 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
 }
 
 class _WTPage extends StatelessWidget {
-  const _WTPage({
-    required this.icon,
-    required this.title,
-    required this.body,
-  });
+  const _WTPage({required this.icon, required this.title, required this.body});
 
   final IconData icon;
   final String title;
@@ -201,11 +185,7 @@ class _WTPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            icon,
-            size: 96,
-            color: RotalaColors.teal,
-          ),
+          Icon(icon, size: 96, color: RotalaColors.teal),
           const SizedBox(height: 24),
           Text(
             title,
@@ -220,10 +200,7 @@ class _WTPage extends StatelessWidget {
           Text(
             body,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 15,
-            ),
+            style: const TextStyle(color: Colors.white70, fontSize: 15),
           ),
         ],
       ),

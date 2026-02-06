@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home.dart';
 import 'forgot_password.dart';
-import 'auth/sign_up_first.dart';
+import 'auth/sign_up_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -56,16 +56,17 @@ class _LoginPageState extends State<LoginPage> {
   void _showAlert(String title, String message) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("OK"),
+      builder:
+          (_) => AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("OK"),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -85,17 +86,18 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 // Square logo hero
                 SizedBox(
-                  width: 300,
+                  width: 400,
                   height: 300,
                   child: Image.asset(
-                    'assets/brand/rotalafinalsquare2.png',
+                    'assets/brand/rotalanew2.png',
                     fit: BoxFit.contain,
-                    semanticLabel: 'RotalaLink logo',
-                    errorBuilder: (_, __, ___) => Icon(
-                      Icons.image_not_supported_outlined,
-                      size: 64,
-                      color: cs.onSurface.withOpacity(.5),
-                    ),
+                    semanticLabel: 'Rotala',
+                    errorBuilder:
+                        (_, __, ___) => Icon(
+                          Icons.image_not_supported_outlined,
+                          size: 64,
+                          color: cs.onSurface.withOpacity(.5),
+                        ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -125,9 +127,10 @@ class _LoginPageState extends State<LoginPage> {
                     labelText: "Password",
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      onPressed: _loading
-                          ? null
-                          : () => setState(() => _obscure = !_obscure),
+                      onPressed:
+                          _loading
+                              ? null
+                              : () => setState(() => _obscure = !_obscure),
                       icon: Icon(
                         _obscure ? Icons.visibility_off : Icons.visibility,
                       ),
@@ -142,16 +145,17 @@ class _LoginPageState extends State<LoginPage> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: _loading
-                        ? null
-                        : () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ForgotPasswordPage(),
-                              ),
-                            );
-                          },
+                    onPressed:
+                        _loading
+                            ? null
+                            : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ForgotPasswordPage(),
+                                ),
+                              );
+                            },
                     child: const Text("Forgot password?"),
                   ),
                 ),
@@ -163,19 +167,20 @@ class _LoginPageState extends State<LoginPage> {
                   height: 50,
                   child: FilledButton(
                     onPressed: _loading ? null : _login,
-                    child: _loading
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            "Log In",
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                    child:
+                        _loading
+                            ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : const Text(
+                              "Log In",
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -192,17 +197,17 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     TextButton(
-                      onPressed: _loading
-                          ? null
-                          : () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const SignUpFirstNamePage(),
-                                ),
-                              );
-                            },
+                      onPressed:
+                          _loading
+                              ? null
+                              : () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const SignUpPage(),
+                                  ),
+                                );
+                              },
                       child: const Text(
                         "Sign Up",
                         style: TextStyle(

@@ -4,7 +4,6 @@ import 'package:flutter/services.dart'; // match system brightness
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'login_page.dart';
-import 'welcome_page.dart';
 import 'auth/reset_password.dart';
 import 'ui/aqua_schemes.dart';
 import 'ui/aqua_theme.dart';
@@ -18,7 +17,8 @@ Future<void> main() async {
   // Initialize supabase once at startup
   await Supabase.initialize(
     url: 'https://dbfglovgjuzqiejekflg.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRiZmdsb3ZnanV6cWllamVrZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM4ODI2NzQsImV4cCI6MjA1OTQ1ODY3NH0.mzRht4dDiCC9GQlX_5c1K_UJKWXvKeAHPBHqBVNsHvU',
+    anonKey:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRiZmdsb3ZnanV6cWllamVrZmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM4ODI2NzQsImV4cCI6MjA1OTQ1ODY3NH0.mzRht4dDiCC9GQlX_5c1K_UJKWXvKeAHPBHqBVNsHvU',
     authOptions: const FlutterAuthClientOptions(
       autoRefreshToken: true,
       // persistSession is not available in 2.10.3, and persistence is on by default
@@ -61,8 +61,8 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     // A) Ocean Core  |  B) Coral Lead  |  C) Deep Blue
-    final light = oceanCoreLight;  // or coralLeadLight, deepBlueLight
-    final dark  = oceanCoreDark;   // or coralLeadDark,  deepBlueDark
+    final light = oceanCoreLight; // or coralLeadLight, deepBlueLight
+    final dark = oceanCoreDark; // or coralLeadDark,  deepBlueDark
 
     return MaterialApp(
       navigatorKey: navigatorKey, // 👈 important!

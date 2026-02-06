@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'home.dart';
-import 'welcome_page.dart';
+import 'login_page.dart';
 
 class RootRouter extends StatefulWidget {
   const RootRouter({super.key});
@@ -56,13 +56,9 @@ class _RootRouterState extends State<RootRouter> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    return _hasSession ? const HomePage() : const WelcomePage();
+    return _hasSession ? const HomePage() : const LoginPage();
   }
 }
