@@ -8,9 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../onboarding/walkthrough.dart';
-import '../tank_detail_page.dart';
-import '../widgets/app_scaffold.dart';
+import 'onboarding/walkthrough.dart';
+import 'tank_detail_page.dart';
+import 'widgets/app_scaffold.dart';
 import 'app_settings.dart';
 import 'quick_actions.dart';
 import 'tank_views.dart';
@@ -57,6 +57,9 @@ class HomePage extends StatefulWidget {
 enum LayoutMode { grid2, list, cards }
 
 class _HomePageState extends State<HomePage> {
+  static const int _kMaxTanksPerUser = 10;
+  static const int _kMaxMeasurementsPerTank = 500;
+
   late final Stream<List<Map<String, dynamic>>> _tankStream;
 
   bool _retryingTanks = false;
@@ -88,13 +91,18 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
 
-    _tankStream = _supa.from('tanks').stream(primaryKey: ['id']).order('created_at');
+    _tankStream = _supa
+        .from('tanks')
+        .stream(primaryKey: ['id'])
+        .order('created_at');
 
     _searchCtrl.addListener(() => setState(() {}));
 
     AppSettings.load();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowWalkthrough());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _maybeShowWalkthrough(),
+    );
 
     _loadLayoutMode();
   }
@@ -129,19 +137,19 @@ class _HomePageState extends State<HomePage> {
     final r = BorderRadius.circular(_kPillRadius);
 
     OutlineInputBorder none() => OutlineInputBorder(
-          borderRadius: r,
-          borderSide: BorderSide.none, // no gray outline when unfocused
-        );
+      borderRadius: r,
+      borderSide: BorderSide.none, // no gray outline when unfocused
+    );
 
     OutlineInputBorder teal() => OutlineInputBorder(
-          borderRadius: r,
-          borderSide: const BorderSide(color: Colors.tealAccent, width: 1.2),
-        );
+      borderRadius: r,
+      borderSide: const BorderSide(color: Colors.tealAccent, width: 1.2),
+    );
 
     OutlineInputBorder err() => OutlineInputBorder(
-          borderRadius: r,
-          borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
-        );
+      borderRadius: r,
+      borderSide: const BorderSide(color: Colors.redAccent, width: 1.2),
+    );
 
     return InputDecoration(
       labelText: label,
@@ -192,13 +200,62 @@ class _HomePageState extends State<HomePage> {
 
   double? _tryParseDouble(String s) => double.tryParse(s.trim());
 
+  Future<int> _fetchTankCountForCurrentUser() async {
+    final uid = _supa.auth.currentUser?.id;
+    if (uid == null) return 0;
+
+    final rows = await _supa.from('tanks').select('id').eq('user_id', uid);
+    return (rows as List).length;
+  }
+
+  Future<int> _fetchMeasurementCountForTank(String tankId) async {
+    final rows = await _supa
+        .from('sensor_readings')
+        .select('id')
+        .eq('tank_id', tankId);
+    return (rows as List).length;
+  }
+
+  Future<bool> _tankMeasurementLimitReached(String tankId) async {
+    final count = await _fetchMeasurementCountForTank(tankId);
+    return count >= _kMaxMeasurementsPerTank;
+  }
+
+  void _showTankLimitMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'We are still in development and due to data limits, you cannot add more than 10 tanks at a time. Thank you for being a beta tester!',
+        ),
+        backgroundColor: Colors.orangeAccent,
+      ),
+    );
+  }
+
+  void _showMeasurementLimitMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Measurement limit reached for this tank. Please clear out older measurements before adding more.',
+        ),
+        backgroundColor: Colors.orangeAccent,
+      ),
+    );
+  }
+
   Future<void> _retryLoadTanks() async {
     setState(() {
       _retryingTanks = true;
     });
 
     try {
-      await _supa.from('tanks').select('id').limit(1).timeout(const Duration(seconds: 4));
+      await _supa
+          .from('tanks')
+          .select('id')
+          .limit(1)
+          .timeout(const Duration(seconds: 4));
     } on TimeoutException {
       if (!mounted) return;
       setState(() {
@@ -291,17 +348,21 @@ class _HomePageState extends State<HomePage> {
           .eq('user_id', uid)
           .order('created_at', ascending: false);
 
-      final list = (rows as List)
-          .map(
-            (r) => _GlobalTask(
-              id: r['id'] as String,
-              title: (r['title'] ?? '') as String,
-              done: r['done'] == true,
-              due: r['due_at'] == null ? null : DateTime.parse(r['due_at']).toLocal(),
-              tankId: r['tank_id'] as String?,
-            ),
-          )
-          .toList();
+      final list =
+          (rows as List)
+              .map(
+                (r) => _GlobalTask(
+                  id: r['id'] as String,
+                  title: (r['title'] ?? '') as String,
+                  done: r['done'] == true,
+                  due:
+                      r['due_at'] == null
+                          ? null
+                          : DateTime.parse(r['due_at']).toLocal(),
+                  tankId: r['tank_id'] as String?,
+                ),
+              )
+              .toList();
 
       setState(() {
         _globalTasks
@@ -317,9 +378,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _createOrEditGlobalTask({_GlobalTask? existing}) async {
     final uid = _supa.auth.currentUser?.id;
     if (uid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sign in to manage tasks')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Sign in to manage tasks')));
       return;
     }
 
@@ -328,86 +389,93 @@ class _HomePageState extends State<HomePage> {
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1f2937),
-            title: Text(
-              existing == null ? 'Add Task' : 'Edit Task',
-              style: const TextStyle(color: Colors.white),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: title,
+      builder:
+          (_) => StatefulBuilder(
+            builder: (ctx, setSheet) {
+              return AlertDialog(
+                backgroundColor: const Color(0xFF1f2937),
+                title: Text(
+                  existing == null ? 'Add Task' : 'Edit Task',
                   style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(
-                    labelText: 'Title',
-                    labelStyle: TextStyle(color: Colors.white70),
-                    enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.tealAccent),
-                    ),
-                  ),
                 ),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.edit_calendar, color: Colors.white70),
-                  title: Text(
-                    due == null ? 'No due date' : 'Due: ${_timeExactGlobal(due!)}',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  onTap: () async {
-                    final now = DateTime.now();
-                    final d = await showDatePicker(
-                      context: ctx,
-                      initialDate: due ?? now,
-                      firstDate: now.subtract(const Duration(days: 3650)),
-                      lastDate: now.add(const Duration(days: 3650)),
-                    );
-                    if (d == null) return;
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: TimeOfDay.fromDateTime(due ?? now),
-                    );
-                    setSheet(
-                      () => due = DateTime(
-                        d.year,
-                        d.month,
-                        d.day,
-                        t?.hour ?? 0,
-                        t?.minute ?? 0,
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: title,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white24),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.tealAccent),
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(
+                        Icons.edit_calendar,
+                        color: Colors.white70,
+                      ),
+                      title: Text(
+                        due == null
+                            ? 'No due date'
+                            : 'Due: ${_timeExactGlobal(due!)}',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      onTap: () async {
+                        final now = DateTime.now();
+                        final d = await showDatePicker(
+                          context: ctx,
+                          initialDate: due ?? now,
+                          firstDate: now.subtract(const Duration(days: 3650)),
+                          lastDate: now.add(const Duration(days: 3650)),
+                        );
+                        if (d == null) return;
+                        final t = await showTimePicker(
+                          context: ctx,
+                          initialTime: TimeOfDay.fromDateTime(due ?? now),
+                        );
+                        setSheet(
+                          () =>
+                              due = DateTime(
+                                d.year,
+                                d.month,
+                                d.day,
+                                t?.hour ?? 0,
+                                t?.minute ?? 0,
+                              ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Save'),
+                  ),
+                ],
+              );
+            },
+          ),
     );
 
     if (saved != true) return;
 
     if (title.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Title cannot be empty')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Title cannot be empty')));
       return;
     }
 
@@ -420,10 +488,13 @@ class _HomePageState extends State<HomePage> {
         'due_at': due?.toUtc().toIso8601String(),
       });
     } else {
-      await _supa.from('tank_tasks').update({
-        'title': title.text.trim(),
-        'due_at': due?.toUtc().toIso8601String(),
-      }).eq('id', existing.id);
+      await _supa
+          .from('tank_tasks')
+          .update({
+            'title': title.text.trim(),
+            'due_at': due?.toUtc().toIso8601String(),
+          })
+          .eq('id', existing.id);
     }
 
     await _loadGlobalTasks();
@@ -432,20 +503,21 @@ class _HomePageState extends State<HomePage> {
   Future<void> _deleteGlobalTask(_GlobalTask t) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete task?'),
-        content: const Text('This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder:
+          (_) => AlertDialog(
+            title: const Text('Delete task?'),
+            content: const Text('This cannot be undone.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
     if (ok != true) return;
 
@@ -457,7 +529,10 @@ class _HomePageState extends State<HomePage> {
     final uid = _supa.auth.currentUser?.id;
     if (uid == null) return;
 
-    final tanks = await _supa.from('tanks').select('id,name').order('created_at');
+    final tanks = await _supa
+        .from('tanks')
+        .select('id,name')
+        .order('created_at');
 
     String? selectedTankId;
     final titleCtrl = TextEditingController();
@@ -564,7 +639,8 @@ class _HomePageState extends State<HomePage> {
                         'title': titleCtrl.text.trim(),
                         'tank_id': selectedTankId,
                         'done': false,
-                        if (dueDate != null) 'due_at': dueDate!.toIso8601String(),
+                        if (dueDate != null)
+                          'due_at': dueDate!.toIso8601String(),
                       });
 
                       if (context.mounted) Navigator.pop(ctx);
@@ -583,9 +659,7 @@ class _HomePageState extends State<HomePage> {
   void _openTankDetail(Tank tank) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => TankDetailPage(tank: tank),
-      ),
+      MaterialPageRoute(builder: (_) => TankDetailPage(tank: tank)),
     );
   }
 
@@ -657,10 +731,7 @@ class _HomePageState extends State<HomePage> {
             color: const Color(0xFF0b1220),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(
-            _iconForLayout(_layout),
-            color: Colors.white,
-          ),
+          child: Icon(_iconForLayout(_layout), color: Colors.white),
         ),
       ),
     );
@@ -701,10 +772,7 @@ class _HomePageState extends State<HomePage> {
                 decoration: const InputDecoration(
                   hintText: 'Ask about your tanks or devices',
                   hintStyle: TextStyle(color: Colors.white70),
-                  prefixIcon: Icon(
-                    Icons.smart_toy,
-                    color: Colors.white70,
-                  ),
+                  prefixIcon: Icon(Icons.smart_toy, color: Colors.white70),
                 ),
               ),
               const SizedBox(height: 12),
@@ -748,7 +816,10 @@ class _HomePageState extends State<HomePage> {
 
     await _loadGlobalTasks();
 
-    final List<dynamic> tanks = await _supa.from('tanks').select('id,name').order('created_at');
+    final List<dynamic> tanks = await _supa
+        .from('tanks')
+        .select('id,name')
+        .order('created_at');
 
     _TaskFilter filter = _TaskFilter.open;
     String? selectedTankId;
@@ -790,7 +861,8 @@ class _HomePageState extends State<HomePage> {
                 }
 
                 if (selectedTankId != null) {
-                  visible = visible.where((t) => t.tankId == selectedTankId).toList();
+                  visible =
+                      visible.where((t) => t.tankId == selectedTankId).toList();
                 }
 
                 Widget body;
@@ -874,9 +946,14 @@ class _HomePageState extends State<HomePage> {
                               });
 
                               try {
-                                await Future.delayed(const Duration(milliseconds: 220));
+                                await Future.delayed(
+                                  const Duration(milliseconds: 220),
+                                );
 
-                                await _supa.from('tank_tasks').update({'done': v}).eq('id', t.id);
+                                await _supa
+                                    .from('tank_tasks')
+                                    .update({'done': v})
+                                    .eq('id', t.id);
 
                                 pendingToggles.remove(t.id);
 
@@ -885,18 +962,29 @@ class _HomePageState extends State<HomePage> {
                                 ScaffoldMessenger.of(context).clearSnackBars();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text(v ? 'Task marked complete' : 'Task reopened'),
+                                    content: Text(
+                                      v
+                                          ? 'Task marked complete'
+                                          : 'Task reopened',
+                                    ),
                                     duration: const Duration(seconds: 3),
                                     action: SnackBarAction(
                                       label: 'Undo',
                                       onPressed: () async {
                                         try {
-                                          await _supa.from('tank_tasks').update({'done': !v}).eq('id', t.id);
+                                          await _supa
+                                              .from('tank_tasks')
+                                              .update({'done': !v})
+                                              .eq('id', t.id);
                                           await refresh();
                                         } catch (e) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
                                             SnackBar(
-                                              content: Text('Could not undo: $e'),
+                                              content: Text(
+                                                'Could not undo: $e',
+                                              ),
                                               backgroundColor: Colors.redAccent,
                                             ),
                                           );
@@ -920,19 +1008,25 @@ class _HomePageState extends State<HomePage> {
                               t.title,
                               style: const TextStyle(color: Colors.white),
                             ),
-                            subtitle: t.due == null
-                                ? null
-                                : Text(
-                                    'Due ${_timeExactGlobal(t.due!)}',
-                                    style: const TextStyle(color: Colors.white70),
-                                  ),
+                            subtitle:
+                                t.due == null
+                                    ? null
+                                    : Text(
+                                      'Due ${_timeExactGlobal(t.due!)}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
                             controlAffinity: ListTileControlAffinity.leading,
                             checkboxShape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(6),
                             ),
                             activeColor: Colors.teal,
                             secondary: PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert, color: Colors.white70),
+                              icon: const Icon(
+                                Icons.more_vert,
+                                color: Colors.white70,
+                              ),
                               onSelected: (v) async {
                                 if (v == 'edit') {
                                   await _createOrEditGlobalTask(existing: t);
@@ -943,10 +1037,17 @@ class _HomePageState extends State<HomePage> {
                                   await refresh();
                                 }
                               },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                PopupMenuItem(value: 'delete', child: Text('Delete')),
-                              ],
+                              itemBuilder:
+                                  (_) => const [
+                                    PopupMenuItem(
+                                      value: 'edit',
+                                      child: Text('Edit'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Delete'),
+                                    ),
+                                  ],
                             ),
                           ),
                         );
@@ -1011,7 +1112,10 @@ class _HomePageState extends State<HomePage> {
                         ChoiceChip(
                           label: const Text('All'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.all ? Colors.black : Colors.white70,
+                            color:
+                                filter == _TaskFilter.all
+                                    ? Colors.black
+                                    : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.all,
                           selectedColor: Colors.tealAccent,
@@ -1025,7 +1129,10 @@ class _HomePageState extends State<HomePage> {
                         ChoiceChip(
                           label: const Text('Open'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.open ? Colors.black : Colors.white70,
+                            color:
+                                filter == _TaskFilter.open
+                                    ? Colors.black
+                                    : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.open,
                           selectedColor: Colors.tealAccent,
@@ -1039,7 +1146,10 @@ class _HomePageState extends State<HomePage> {
                         ChoiceChip(
                           label: const Text('Completed'),
                           labelStyle: TextStyle(
-                            color: filter == _TaskFilter.completed ? Colors.black : Colors.white70,
+                            color:
+                                filter == _TaskFilter.completed
+                                    ? Colors.black
+                                    : Colors.white70,
                           ),
                           selected: filter == _TaskFilter.completed,
                           selectedColor: Colors.tealAccent,
@@ -1065,6 +1175,16 @@ class _HomePageState extends State<HomePage> {
 
   // ------------------ UPDATED: Add Tank includes photo at top + no gray outlines ------------------
   Future<void> _openAddTankSheet() async {
+    try {
+      final tankCount = await _fetchTankCountForCurrentUser();
+      if (tankCount >= _kMaxTanksPerUser) {
+        _showTankLimitMessage();
+        return;
+      }
+    } catch (_) {
+      // If count check fails, continue to avoid blocking add flow on transient issues.
+    }
+
     _pendingImageBytes = null;
     _pendingImageName = null;
 
@@ -1076,16 +1196,28 @@ class _HomePageState extends State<HomePage> {
     // Ideal ranges controllers
     final idealTempMinCtrl = TextEditingController();
     final idealTempMaxCtrl = TextEditingController();
-    final idealPhMinCtrl = TextEditingController(text: _defaultIdealPhMin.toStringAsFixed(1));
-    final idealPhMaxCtrl = TextEditingController(text: _defaultIdealPhMax.toStringAsFixed(1));
-    final idealTdsMinCtrl = TextEditingController(text: _defaultIdealTdsMin.toStringAsFixed(0));
-    final idealTdsMaxCtrl = TextEditingController(text: _defaultIdealTdsMax.toStringAsFixed(0));
+    final idealPhMinCtrl = TextEditingController(
+      text: _defaultIdealPhMin.toStringAsFixed(1),
+    );
+    final idealPhMaxCtrl = TextEditingController(
+      text: _defaultIdealPhMax.toStringAsFixed(1),
+    );
+    final idealTdsMinCtrl = TextEditingController(
+      text: _defaultIdealTdsMin.toStringAsFixed(0),
+    );
+    final idealTdsMaxCtrl = TextEditingController(
+      text: _defaultIdealTdsMax.toStringAsFixed(0),
+    );
 
     bool lastUseF = AppSettings.useFahrenheit.value;
 
     if (lastUseF) {
-      idealTempMinCtrl.text = _cToF(_defaultIdealTempMinC).toStringAsFixed(0); // 32
-      idealTempMaxCtrl.text = _cToF(_defaultIdealTempMaxC).toStringAsFixed(0); // 212
+      idealTempMinCtrl.text = _cToF(
+        _defaultIdealTempMinC,
+      ).toStringAsFixed(0); // 32
+      idealTempMaxCtrl.text = _cToF(
+        _defaultIdealTempMaxC,
+      ).toStringAsFixed(0); // 212
     } else {
       idealTempMinCtrl.text = _defaultIdealTempMinC.toStringAsFixed(0); // 0
       idealTempMaxCtrl.text = _defaultIdealTempMaxC.toStringAsFixed(0); // 100
@@ -1137,8 +1269,12 @@ class _HomePageState extends State<HomePage> {
                           lastUseF = useF;
                         }
 
-                        final volumeLabel = useGallons ? 'Volume (gallons)' : 'Volume (liters)';
-                        final volumeHelper = useGallons ? 'Enter tank size in gallons' : 'Enter tank size in liters';
+                        final volumeLabel =
+                            useGallons ? 'Volume (gallons)' : 'Volume (liters)';
+                        final volumeHelper =
+                            useGallons
+                                ? 'Enter tank size in gallons'
+                                : 'Enter tank size in liters';
                         final tempUnit = useF ? '°F' : '°C';
 
                         return SingleChildScrollView(
@@ -1154,16 +1290,30 @@ class _HomePageState extends State<HomePage> {
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Beta limit: up to $_kMaxTanksPerUser tanks per account.',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
                               const SizedBox(height: 14),
 
-                              _sectionHeader(Icons.photo_camera_back, 'Photo (optional)'),
+                              _sectionHeader(
+                                Icons.photo_camera_back,
+                                'Photo (optional)',
+                              ),
                               const SizedBox(height: 8),
                               Row(
                                 children: [
                                   TextButton.icon(
                                     onPressed: () async {
                                       FocusScope.of(ctx).unfocus();
-                                      await _pickFrom(ImageSource.gallery, setStateSheet);
+                                      await _pickFrom(
+                                        ImageSource.gallery,
+                                        setStateSheet,
+                                      );
                                     },
                                     icon: const Icon(Icons.photo_library),
                                     label: const Text('Gallery'),
@@ -1172,7 +1322,10 @@ class _HomePageState extends State<HomePage> {
                                   TextButton.icon(
                                     onPressed: () async {
                                       FocusScope.of(ctx).unfocus();
-                                      await _pickFrom(ImageSource.camera, setStateSheet);
+                                      await _pickFrom(
+                                        ImageSource.camera,
+                                        setStateSheet,
+                                      );
                                     },
                                     icon: const Icon(Icons.photo_camera),
                                     label: const Text('Camera'),
@@ -1194,14 +1347,21 @@ class _HomePageState extends State<HomePage> {
 
                               const SizedBox(height: 18),
 
-                              _sectionHeader(Icons.info_outline, 'Tank details'),
+                              _sectionHeader(
+                                Icons.info_outline,
+                                'Tank details',
+                              ),
                               const SizedBox(height: 10),
 
                               TextFormField(
                                 controller: nameCtrl,
                                 style: const TextStyle(color: Colors.white),
                                 decoration: _pillDeco('Name'),
-                                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                                validator:
+                                    (v) =>
+                                        (v == null || v.trim().isEmpty)
+                                            ? 'Required'
+                                            : null,
                               ),
                               const SizedBox(height: 12),
 
@@ -1230,9 +1390,15 @@ class _HomePageState extends State<HomePage> {
 
                               TextFormField(
                                 controller: volumeCtrl,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
                                 style: const TextStyle(color: Colors.white),
-                                decoration: _pillDeco(volumeLabel, helper: volumeHelper),
+                                decoration: _pillDeco(
+                                  volumeLabel,
+                                  helper: volumeHelper,
+                                ),
                                 validator: (v) {
                                   final n = _tryParseDouble(v ?? '');
                                   if (n == null || n <= 0) {
@@ -1252,18 +1418,32 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTempMinCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
-                                      decoration: _rangeDeco('Temp min ($tempUnit)'),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                      decoration: _rangeDeco(
+                                        'Temp min ($tempUnit)',
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTempMaxCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
-                                      decoration: _rangeDeco('Temp max ($tempUnit)'),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
+                                      decoration: _rangeDeco(
+                                        'Temp max ($tempUnit)',
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1275,8 +1455,13 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealPhMinCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
                                       decoration: _rangeDeco('pH min'),
                                     ),
                                   ),
@@ -1284,8 +1469,13 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealPhMaxCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
                                       decoration: _rangeDeco('pH max'),
                                     ),
                                   ),
@@ -1298,8 +1488,13 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTdsMinCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
                                       decoration: _rangeDeco('TDS min (ppm)'),
                                     ),
                                   ),
@@ -1307,8 +1502,13 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: idealTdsMaxCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      style: const TextStyle(color: Colors.white),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                      ),
                                       decoration: _rangeDeco('TDS max (ppm)'),
                                     ),
                                   ),
@@ -1321,7 +1521,8 @@ class _HomePageState extends State<HomePage> {
                                 children: [
                                   Expanded(
                                     child: OutlinedButton(
-                                      onPressed: () => Navigator.pop(ctx, false),
+                                      onPressed:
+                                          () => Navigator.pop(ctx, false),
                                       child: const Text('Cancel'),
                                     ),
                                   ),
@@ -1329,9 +1530,12 @@ class _HomePageState extends State<HomePage> {
                                   Expanded(
                                     child: FilledButton(
                                       onPressed: () async {
-                                        if (!formKey.currentState!.validate()) return;
+                                        if (!formKey.currentState!.validate())
+                                          return;
 
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
                                           const SnackBar(
                                             content: Text('Saving...'),
                                             duration: Duration(seconds: 1),
@@ -1339,15 +1543,30 @@ class _HomePageState extends State<HomePage> {
                                         );
 
                                         try {
-                                          final uid = _supa.auth.currentUser!.id;
+                                          final uid =
+                                              _supa.auth.currentUser!.id;
+                                          final tankCount =
+                                              await _fetchTankCountForCurrentUser();
+                                          if (tankCount >= _kMaxTanksPerUser) {
+                                            if (mounted) {
+                                              Navigator.pop(ctx, false);
+                                              _showTankLimitMessage();
+                                            }
+                                            return;
+                                          }
 
                                           String? imageUrl;
                                           if (_pendingImageBytes != null) {
-                                            imageUrl = await _uploadTankImage(_pendingImageBytes!);
+                                            imageUrl = await _uploadTankImage(
+                                              _pendingImageBytes!,
+                                            );
                                           }
 
-                                          final raw = double.parse(volumeCtrl.text.trim());
-                                          final useGallonsNow = AppSettings.useGallons.value;
+                                          final raw = double.parse(
+                                            volumeCtrl.text.trim(),
+                                          );
+                                          final useGallonsNow =
+                                              AppSettings.useGallons.value;
 
                                           final double gallons;
                                           final double liters;
@@ -1360,11 +1579,25 @@ class _HomePageState extends State<HomePage> {
                                             gallons = liters / 3.785411784;
                                           }
 
-                                          final tMinDisplay = _tryD(idealTempMinCtrl);
-                                          final tMaxDisplay = _tryD(idealTempMaxCtrl);
+                                          final tMinDisplay = _tryD(
+                                            idealTempMinCtrl,
+                                          );
+                                          final tMaxDisplay = _tryD(
+                                            idealTempMaxCtrl,
+                                          );
 
-                                          final idealTempMinF = tMinDisplay == null ? null : (useF ? tMinDisplay : _cToF(tMinDisplay));
-                                          final idealTempMaxF = tMaxDisplay == null ? null : (useF ? tMaxDisplay : _cToF(tMaxDisplay));
+                                          final idealTempMinF =
+                                              tMinDisplay == null
+                                                  ? null
+                                                  : (useF
+                                                      ? tMinDisplay
+                                                      : _cToF(tMinDisplay));
+                                          final idealTempMaxF =
+                                              tMaxDisplay == null
+                                                  ? null
+                                                  : (useF
+                                                      ? tMaxDisplay
+                                                      : _cToF(tMaxDisplay));
 
                                           await _supa.from('tanks').insert({
                                             'user_id': uid,
@@ -1372,27 +1605,43 @@ class _HomePageState extends State<HomePage> {
                                             'water_type': waterType,
                                             'volume_liters': liters,
                                             'volume_gallons': gallons,
-                                            if (imageUrl != null) 'image_url': imageUrl,
+                                            if (imageUrl != null)
+                                              'image_url': imageUrl,
                                             'ideal_temp_min': idealTempMinF,
                                             'ideal_temp_max': idealTempMaxF,
-                                            'ideal_ph_min': _tryD(idealPhMinCtrl),
-                                            'ideal_ph_max': _tryD(idealPhMaxCtrl),
-                                            'ideal_tds_min': _tryD(idealTdsMinCtrl),
-                                            'ideal_tds_max': _tryD(idealTdsMaxCtrl),
+                                            'ideal_ph_min': _tryD(
+                                              idealPhMinCtrl,
+                                            ),
+                                            'ideal_ph_max': _tryD(
+                                              idealPhMaxCtrl,
+                                            ),
+                                            'ideal_tds_min': _tryD(
+                                              idealTdsMinCtrl,
+                                            ),
+                                            'ideal_tds_max': _tryD(
+                                              idealTdsMaxCtrl,
+                                            ),
                                           });
 
                                           if (mounted) {
                                             Navigator.pop(ctx, true);
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Tank added')),
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('Tank added'),
+                                              ),
                                             );
                                           }
                                         } catch (e) {
                                           if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
                                               SnackBar(
                                                 content: Text('Failed: $e'),
-                                                backgroundColor: Colors.redAccent,
+                                                backgroundColor:
+                                                    Colors.redAccent,
                                               ),
                                             );
                                           }
@@ -1422,7 +1671,10 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _openManualEntrySheet() async {
     try {
-      final tanks = await _supa.from('tanks').select('id,name').order('created_at');
+      final tanks = await _supa
+          .from('tanks')
+          .select('id,name')
+          .order('created_at');
       if (!mounted) return;
 
       String? tankId = tanks.isNotEmpty ? tanks.first['id'] as String : null;
@@ -1479,13 +1731,17 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: phCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: const InputDecoration(labelText: 'pH'),
                     ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: tdsCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: const InputDecoration(labelText: 'TDS ppm'),
                     ),
                     const SizedBox(height: 8),
@@ -1495,8 +1751,12 @@ class _HomePageState extends State<HomePage> {
                         final unit = useFahrenheit ? '°F' : '°C';
                         return TextField(
                           controller: tempCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: InputDecoration(labelText: 'Temperature $unit'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: InputDecoration(
+                            labelText: 'Temperature $unit',
+                          ),
                         );
                       },
                     ),
@@ -1504,44 +1764,82 @@ class _HomePageState extends State<HomePage> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
-                        onPressed: tankId == null
-                            ? null
-                            : () async {
-                                try {
-                                  await _supa.from('sensor_readings').insert({
-                                    'tank_id': tankId,
-                                    'recorded_at': DateTime.now().toUtc().toIso8601String(),
-                                    'device_uid': null,
-                                    if (phCtrl.text.trim().isNotEmpty) 'ph': double.tryParse(phCtrl.text.trim()),
-                                    if (tdsCtrl.text.trim().isNotEmpty) 'tds': double.tryParse(tdsCtrl.text.trim()),
-                                    if (tempCtrl.text.trim().isNotEmpty)
-                                      'temperature': (() {
-                                        final displayVal = double.tryParse(tempCtrl.text.trim());
-                                        if (displayVal == null) return null;
+                        onPressed:
+                            tankId == null
+                                ? null
+                                : () async {
+                                  try {
+                                    final selectedTankId = tankId;
+                                    if (selectedTankId == null) return;
 
-                                        final useFahrenheitNow = AppSettings.useFahrenheit.value;
-                                        return useFahrenheitNow ? displayVal : _cToF(displayVal);
-                                      })(),
-                                  });
+                                    final limitReached =
+                                        await _tankMeasurementLimitReached(
+                                          selectedTankId,
+                                        );
+                                    if (limitReached) {
+                                      _showMeasurementLimitMessage();
+                                      return;
+                                    }
 
-                                  if (mounted) Navigator.pop(ctx);
+                                    await _supa.from('sensor_readings').insert({
+                                      'tank_id': selectedTankId,
+                                      'recorded_at':
+                                          DateTime.now()
+                                              .toUtc()
+                                              .toIso8601String(),
+                                      'device_uid': null,
+                                      if (phCtrl.text.trim().isNotEmpty)
+                                        'ph': double.tryParse(
+                                          phCtrl.text.trim(),
+                                        ),
+                                      if (tdsCtrl.text.trim().isNotEmpty)
+                                        'tds': double.tryParse(
+                                          tdsCtrl.text.trim(),
+                                        ),
+                                      if (tempCtrl.text.trim().isNotEmpty)
+                                        'temperature':
+                                            (() {
+                                              final displayVal =
+                                                  double.tryParse(
+                                                    tempCtrl.text.trim(),
+                                                  );
+                                              if (displayVal == null)
+                                                return null;
 
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Reading added')),
-                                    );
+                                              final useFahrenheitNow =
+                                                  AppSettings
+                                                      .useFahrenheit
+                                                      .value;
+                                              return useFahrenheitNow
+                                                  ? displayVal
+                                                  : _cToF(displayVal);
+                                            })(),
+                                    });
+
+                                    if (mounted) Navigator.pop(ctx);
+
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Reading added'),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Failed: $e'),
+                                          backgroundColor: Colors.redAccent,
+                                        ),
+                                      );
+                                    }
                                   }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Failed: $e'),
-                                        backgroundColor: Colors.redAccent,
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
+                                },
                         child: const Text('Save'),
                       ),
                     ),
@@ -1587,9 +1885,9 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Image error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Image error: $e')));
     }
   }
 
@@ -1598,7 +1896,9 @@ class _HomePageState extends State<HomePage> {
     final id = const Uuid().v4();
     final path = '$uid/tanks/$id.jpg';
 
-    await _supa.storage.from('tank-images').uploadBinary(
+    await _supa.storage
+        .from('tank-images')
+        .uploadBinary(
           path,
           bytes,
           fileOptions: const FileOptions(
@@ -1607,7 +1907,9 @@ class _HomePageState extends State<HomePage> {
           ),
         );
 
-    final signed = await _supa.storage.from('tank-images').createSignedUrl(path, 60 * 60 * 24 * 30);
+    final signed = await _supa.storage
+        .from('tank-images')
+        .createSignedUrl(path, 60 * 60 * 24 * 30);
     return signed;
   }
 
@@ -1634,11 +1936,7 @@ class _HomePageState extends State<HomePage> {
       currentIndex: 0,
       title: title,
       aquaspecNamePrefix: 'AquaSpec',
-      initialCredentials: const {
-        'ssid': '',
-        'password': '',
-        'device_key': '',
-      },
+      initialCredentials: const {'ssid': '', 'password': '', 'device_key': ''},
       body: Stack(
         children: [
           Padding(
@@ -1673,7 +1971,9 @@ class _HomePageState extends State<HomePage> {
                           key: ValueKey('tank_stream_$_refreshTick'),
                           stream: _tankStream,
                           builder: (context, snap) {
-                            if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+                            if (snap.connectionState ==
+                                    ConnectionState.waiting &&
+                                !snap.hasData) {
                               // needs to be scrollable for pull-to-refresh gesture
                               return ListView(
                                 physics: const AlwaysScrollableScrollPhysics(),
@@ -1684,21 +1984,32 @@ class _HomePageState extends State<HomePage> {
                               );
                             }
 
-                            if (snap.hasError && (snap.data == null || (snap.data?.isEmpty ?? true))) {
+                            if (snap.hasError &&
+                                (snap.data == null ||
+                                    (snap.data?.isEmpty ?? true))) {
                               final msg = snap.error.toString();
-                              final isOffline = msg.contains('SocketException') || msg.contains('Failed host lookup');
+                              final isOffline =
+                                  msg.contains('SocketException') ||
+                                  msg.contains('Failed host lookup');
 
                               if (_retryingTanks) {
                                 return ListView(
-                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
                                   children: [
                                     const SizedBox(height: 140),
-                                    const Center(child: CircularProgressIndicator()),
+                                    const Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
                                     const SizedBox(height: 12),
                                     Center(
                                       child: Text(
-                                        isOffline ? 'Reconnecting…' : 'Trying again…',
-                                        style: const TextStyle(color: Colors.white70),
+                                        isOffline
+                                            ? 'Reconnecting…'
+                                            : 'Trying again…',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -1710,14 +2021,20 @@ class _HomePageState extends State<HomePage> {
                                 children: [
                                   const SizedBox(height: 90),
                                   Icon(
-                                    isOffline ? Icons.wifi_off : Icons.error_outline,
+                                    isOffline
+                                        ? Icons.wifi_off
+                                        : Icons.error_outline,
                                     color: Colors.white70,
                                     size: 40,
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
-                                    isOffline ? 'Oops, looks like you are offline.' : 'Something went wrong while loading tanks.',
-                                    style: const TextStyle(color: Colors.white70),
+                                    isOffline
+                                        ? 'Oops, looks like you are offline.'
+                                        : 'Something went wrong while loading tanks.',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
                                     textAlign: TextAlign.center,
                                   ),
                                   const SizedBox(height: 8),
@@ -1736,17 +2053,22 @@ class _HomePageState extends State<HomePage> {
 
                             if (_retryingTanks && all.isNotEmpty) {
                               WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted) setState(() => _retryingTanks = false);
+                                if (mounted)
+                                  setState(() => _retryingTanks = false);
                               });
                             }
 
                             final q = _searchCtrl.text.trim().toLowerCase();
-                            final tanks = q.isEmpty
-                                ? all
-                                : all.where((row) {
-                                    final name = (row['name'] ?? '').toString().toLowerCase();
-                                    return name.contains(q);
-                                  }).toList();
+                            final tanks =
+                                q.isEmpty
+                                    ? all
+                                    : all.where((row) {
+                                      final name =
+                                          (row['name'] ?? '')
+                                              .toString()
+                                              .toLowerCase();
+                                      return name.contains(q);
+                                    }).toList();
 
                             if (tanks.isEmpty) {
                               return ListView(
@@ -1756,7 +2078,10 @@ class _HomePageState extends State<HomePage> {
                                   Center(
                                     child: TextButton.icon(
                                       onPressed: _openAddTankSheet,
-                                      icon: const Icon(Icons.add, color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.add,
+                                        color: Colors.white,
+                                      ),
                                       label: const Text(
                                         'Add your first tank',
                                         style: TextStyle(color: Colors.white),
@@ -1774,24 +2099,33 @@ class _HomePageState extends State<HomePage> {
                                 padding: EdgeInsets.zero,
                                 children: [
                                   SizedBox(
-                                    height: MediaQuery.of(context).size.height * 0.62,
+                                    height:
+                                        MediaQuery.of(context).size.height *
+                                        0.62,
                                     child: PageView.builder(
                                       scrollDirection: Axis.vertical,
-                                      controller: PageController(viewportFraction: 1.0),
-                                      physics: tanks.length == 1
-                                          ? const NeverScrollableScrollPhysics()
-                                          : const PageScrollPhysics(),
-                                      itemCount: tanks.length,
-                                      itemBuilder: (_, i) => Padding(
-                                        padding: EdgeInsets.only(
-                                          bottom: i == tanks.length - 1 ? 0 : 12,
-                                        ),
-                                        child: TankCard(
-                                          row: tanks[i],
-                                          onOpen: _openTankDetail,
-                                          useFahrenheit: useFahrenheit,
-                                        ),
+                                      controller: PageController(
+                                        viewportFraction: 1.0,
                                       ),
+                                      physics:
+                                          tanks.length == 1
+                                              ? const NeverScrollableScrollPhysics()
+                                              : const PageScrollPhysics(),
+                                      itemCount: tanks.length,
+                                      itemBuilder:
+                                          (_, i) => Padding(
+                                            padding: EdgeInsets.only(
+                                              bottom:
+                                                  i == tanks.length - 1
+                                                      ? 0
+                                                      : 12,
+                                            ),
+                                            child: TankCard(
+                                              row: tanks[i],
+                                              onOpen: _openTankDetail,
+                                              useFahrenheit: useFahrenheit,
+                                            ),
+                                          ),
                                     ),
                                   ),
                                 ],
@@ -1802,29 +2136,33 @@ class _HomePageState extends State<HomePage> {
                               return ListView.separated(
                                 physics: const AlwaysScrollableScrollPhysics(),
                                 itemCount: tanks.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                                itemBuilder: (_, i) => TankListTile(
-                                  row: tanks[i],
-                                  onOpen: _openTankDetail,
-                                  useFahrenheit: useFahrenheit,
-                                ),
+                                separatorBuilder:
+                                    (_, __) => const SizedBox(height: 12),
+                                itemBuilder:
+                                    (_, i) => TankListTile(
+                                      row: tanks[i],
+                                      onOpen: _openTankDetail,
+                                      useFahrenheit: useFahrenheit,
+                                    ),
                               );
                             }
 
                             return GridView.builder(
                               physics: const AlwaysScrollableScrollPhysics(),
-                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                mainAxisSpacing: 12,
-                                crossAxisSpacing: 12,
-                                childAspectRatio: 0.75,
-                              ),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    mainAxisSpacing: 12,
+                                    crossAxisSpacing: 12,
+                                    childAspectRatio: 0.75,
+                                  ),
                               itemCount: tanks.length,
-                              itemBuilder: (_, i) => TankGridCard(
-                                row: tanks[i],
-                                onOpen: _openTankDetail,
-                                useFahrenheit: useFahrenheit,
-                              ),
+                              itemBuilder:
+                                  (_, i) => TankGridCard(
+                                    row: tanks[i],
+                                    onOpen: _openTankDetail,
+                                    useFahrenheit: useFahrenheit,
+                                  ),
                             );
                           },
                         );
@@ -1847,11 +2185,7 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   const Icon(Icons.add, size: 20, color: Colors.white),
                   const SizedBox(width: 5),
-                  Icon(
-                    MdiIcons.fishbowlOutline,
-                    size: 30,
-                    color: Colors.white,
-                  ),
+                  Icon(MdiIcons.fishbowlOutline, size: 30, color: Colors.white),
                 ],
               ),
               label: const SizedBox.shrink(),

@@ -26,6 +26,8 @@ class TankDetailPage extends StatefulWidget {
 
 class _TankDetailPageState extends State<TankDetailPage>
     with SingleTickerProviderStateMixin {
+  static const int _kMaxMeasurementsPerTank = 500;
+
   // Color scheme
   static const _kTempBlue = Color(0xFF2F80ED);
   static const _kPhGreen = Color(0xFF27AE60);
@@ -171,6 +173,30 @@ Widget _logoAvatarFallback({required double size}) {
               deviceUid: r['device_uid'] as String?,
             ))
         .toList();
+  }
+
+  Future<int> _fetchMeasurementCountForTank(String tankId) async {
+    final supa = Supabase.instance.client;
+    final rows =
+        await supa.from('sensor_readings').select('id').eq('tank_id', tankId);
+    return (rows as List).length;
+  }
+
+  Future<bool> _tankMeasurementLimitReached(String tankId) async {
+    final count = await _fetchMeasurementCountForTank(tankId);
+    return count >= _kMaxMeasurementsPerTank;
+  }
+
+  void _showMeasurementLimitMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Measurement limit reached for this tank. Please clear out older measurements before adding more.',
+        ),
+        backgroundColor: Colors.orangeAccent,
+      ),
+    );
   }
 
   DateTime? _periodFromDate(Period p) {
@@ -1710,6 +1736,14 @@ Widget _logoAvatarFallback({required double size}) {
                                       return;
                                     }
                                     if (!formKey.currentState!.validate()) return;
+
+                                    final limitReached = await _tankMeasurementLimitReached(
+                                      widget.tank.id,
+                                    );
+                                    if (limitReached) {
+                                      _showMeasurementLimitMessage();
+                                      return;
+                                    }
 
                                     setSheet(() => saving = true);
                                     try {

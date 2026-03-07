@@ -17,10 +17,10 @@
     <!-- ✅ Pre-Android 12 fallbacks (<= API 30) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Permissions for camera -->
-    <uses-permission android:name="android.permision.CAMERA" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <application
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

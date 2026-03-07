@@ -1,0 +1,63 @@
+workflows:
+  android_release:
+    name: Android Release AAB
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      vars:
+        PACKAGE_NAME: "com.rextippetts.rotala.aquaspec"
+    scripts:
+      - name: Install dependencies
+        script: |
+          flutter pub get
+
+      - name: Configure Android signing
+        script: |
+          echo "$CM_ANDROID_KEYSTORE_BASE64" | base64 --decode > /tmp/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=$CM_ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$CM_ANDROID_KEY_PASSWORD
+          keyAlias=$CM_ANDROID_KEY_ALIAS
+          storeFile=/tmp/upload-keystore.jks
+          EOF
+
+      - name: Build Android App Bundle
+        script: |
+          flutter build appbundle --release
+
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
+      - build/app/outputs/mapping/release/mapping.txt
+
+  ios_release:
+    name: iOS Release IPA
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      vars:
+        BUNDLE_ID: "com.rotalasystems.rotalalink"
+        XCODE_WORKSPACE: "ios/Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
+    scripts:
+      - name: Install dependencies
+        script: |
+          flutter pub get
+          cd ios
+          pod install
+          cd ..
+
+      - name: Set up iOS code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          xcode-project use-profiles
+
+      - name: Build iOS IPA
+        script: |
+          flutter build ipa --release
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
