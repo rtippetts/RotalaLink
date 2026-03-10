@@ -36,6 +36,8 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
+      groups:
+        - ios_signing
       vars:
         BUNDLE_ID: "com.rotalasystems.rotalalink"
         XCODE_WORKSPACE: "ios/Runner.xcworkspace"
