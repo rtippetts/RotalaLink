@@ -50,8 +50,20 @@ workflows:
 
       - name: Set up iOS code signing
         script: |
+          if [ -z "$APP_STORE_CONNECT_KEY_IDENTIFIER" ] || [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ]; then
+            echo "Missing App Store Connect API credentials in environment."
+            echo "APP_STORE_CONNECT_ISSUER_ID set: yes"
+            echo "APP_STORE_CONNECT_KEY_IDENTIFIER set: ${APP_STORE_CONNECT_KEY_IDENTIFIER:+yes}"
+            echo "APP_STORE_CONNECT_PRIVATE_KEY set: ${APP_STORE_CONNECT_PRIVATE_KEY:+yes}"
+            exit 1
+          fi
           keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create \
+            --issuer-id "2cbdd8cf-314d-41a8-a7b8-6a6d227749d7" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY"
           xcode-project use-profiles
 
       - name: Build iOS IPA
