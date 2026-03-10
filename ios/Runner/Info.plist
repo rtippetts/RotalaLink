@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>RotalaLink</string>
+	<string>Rotala</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>rotalalink</string>
+	<string>rotala</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -38,20 +38,20 @@
 
 	<!-- CAMERA + PHOTO PERMISSIONS MUST BE HERE -->
 	<key>NSCameraUsageDescription</key>
-	<string>RotalaLink uses the camera to take photos of your tanks.</string>
+	<string>Rotala uses the camera to take photos of your tanks.</string>
 
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>RotalaLink needs access to your photo library to select tank photos.</string>
+	<string>Rotala needs access to your photo library to select tank photos.</string>
 
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>RotalaLink saves tank photos to your library.</string>
+	<string>Rotala saves tank photos to your library.</string>
 
 	<!-- Bluetooth Permissions -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>RotalaLink uses Bluetooth to connect to your AquaSpec device.</string>
+	<string>Rotala uses Bluetooth to connect to your AquaSpec device.</string>
 
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>RotalaLink uses Bluetooth to connect to your AquaSpec device.</string>
+	<string>Rotala uses Bluetooth to connect to your AquaSpec device.</string>
 
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>

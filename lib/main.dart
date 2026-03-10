@@ -66,7 +66,7 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       navigatorKey: navigatorKey, // 👈 important!
-      title: 'RotalaLink',
+      title: 'Rotala',
       theme: aquaTheme(light),
       darkTheme: aquaTheme(dark),
       themeMode: ThemeMode.dark,
