@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../tank_detail_page.dart';
 import '../app_settings.dart';
+import '../tank_parameters.dart';
 
 /// Shared label helper
 String _labelForWaterType(String v) {
@@ -49,6 +50,8 @@ class TankCard extends StatelessWidget {
       inhabitants: _labelForWaterType(waterType),
       imageUrl: imageUrl,
       waterType: waterType,
+      tracking: trackingMapFromRow(row),
+      idealRanges: idealRangeMapFromRow(row),
     );
 
     return GestureDetector(
@@ -86,15 +89,6 @@ class TankCard extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            // latest parameters
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: LatestParams(
-                tankId: id,
-                useFahrenheit: useFahrenheit,
               ),
             ),
             const SizedBox(height: 12),
@@ -138,6 +132,8 @@ class TankListTile extends StatelessWidget {
       inhabitants: _labelForWaterType(waterType),
       imageUrl: imageUrl,
       waterType: waterType,
+      tracking: trackingMapFromRow(row),
+      idealRanges: idealRangeMapFromRow(row),
     );
 
     return InkWell(
@@ -184,12 +180,6 @@ class TankListTile extends StatelessWidget {
                   );
                 },
               ),
-              const SizedBox(height: 4),
-              LatestParams(
-                tankId: id,
-                compact: true,
-                useFahrenheit: useFahrenheit,
-              ),
             ],
           ),
           trailing: const Icon(Icons.chevron_right, color: Colors.white70),
@@ -232,6 +222,8 @@ class TankGridCard extends StatelessWidget {
       inhabitants: _labelForWaterType(waterType),
       imageUrl: imageUrl,
       waterType: waterType,
+      tracking: trackingMapFromRow(row),
+      idealRanges: idealRangeMapFromRow(row),
     );
 
     return InkWell(
@@ -287,15 +279,6 @@ class TankGridCard extends StatelessWidget {
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   );
                 },
-              ),
-            ),
-            const SizedBox(height: 6),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: LatestParams(
-                tankId: id,
-                compact: true,
-                useFahrenheit: useFahrenheit,
               ),
             ),
             const SizedBox(height: 10),
@@ -397,28 +380,25 @@ class LatestParams extends StatelessWidget {
         }
 
         if (compact) {
-          // compact view used in list and grid cards
-          final iconRow = Row(
+          // Compact view used in list and grid cards. Keep values only.
+          final metricsRow = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _stackedMini(
-                icon: Icons.thermostat,
-                color: _kTempBlue,
+              _compactMetricText(
                 text: tempDisplay == null
                     ? 'n/a'
                     : '${tempDisplay.toStringAsFixed(1)}$unit',
+                color: _kTempBlue,
               ),
               const SizedBox(width: 14),
-              _stackedMini(
-                icon: Icons.science,
-                color: _kPhGreen,
+              _compactMetricText(
                 text: ph == null ? 'n/a' : ph.toStringAsFixed(1),
+                color: _kPhGreen,
               ),
               const SizedBox(width: 14),
-              _stackedMini(
-                icon: Icons.bubble_chart,
-                color: _kTdsPurple,
+              _compactMetricText(
                 text: tds == null ? 'n/a' : '${tds.toStringAsFixed(0)} ppm',
+                color: _kTdsPurple,
               ),
             ],
           );
@@ -426,7 +406,7 @@ class LatestParams extends StatelessWidget {
           return FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.center,
-            child: iconRow,
+            child: metricsRow,
           );
         }
 
@@ -558,31 +538,19 @@ class LatestParams extends StatelessWidget {
   }
 }
 
-Widget _stackedMini({
-  required IconData icon,
+Widget _compactMetricText({
   required String text,
   required Color color,
 }) {
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(
-        icon,
-        size: 30,
-        color: color,
-      ),
-      const SizedBox(height: 2),
-      Text(
-        text,
-        textAlign: TextAlign.center,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    ],
+  return Text(
+    text,
+    textAlign: TextAlign.center,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: color,
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+    ),
   );
 }
 

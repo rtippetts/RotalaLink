@@ -1,51 +1,23 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import 'onboarding/walkthrough.dart';
 import 'tank_detail_page.dart';
+import 'tank_parameters.dart';
 import 'widgets/app_scaffold.dart';
 import 'app_settings.dart';
-import 'quick_actions.dart';
+import 'offline_store.dart';
 import 'tank_views.dart';
 import 'theme/rotala_brand.dart';
 
 final _supa = Supabase.instance.client;
-
-String _firstNameFromUser(User? user) {
-  if (user == null) return '';
-
-  final md = user.userMetadata ?? {};
-
-  final fn = (md['first_name'] ?? '').toString().trim();
-  if (fn.isNotEmpty && fn != '-') return fn;
-
-  final disp = (md['display_name'] ?? '').toString().trim();
-  if (disp.isNotEmpty && disp != '-') {
-    if (disp.contains(',')) {
-      final parts = disp.split(',');
-      if (parts.length > 1) {
-        final right = parts[1].trim();
-        if (right.isNotEmpty) {
-          return right.split(RegExp(r'\s+')).first;
-        }
-      }
-    } else {
-      final tokens = disp.split(RegExp(r'\s+'));
-      if (tokens.isNotEmpty) return tokens.first;
-    }
-  }
-
-  final email = user.email ?? '';
-  if (email.contains('@')) return email.split('@').first;
-  return '';
-}
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -71,21 +43,21 @@ class _HomePageState extends State<HomePage> {
   Uint8List? _pendingImageBytes;
   String? _pendingImageName;
 
-  final TextEditingController _searchCtrl = TextEditingController();
   LayoutMode _layout = LayoutMode.grid2;
+  List<Map<String, dynamic>> _latestTanks = const [];
 
   final List<_GlobalTask> _globalTasks = [];
   bool _loadingGlobalTasks = false;
 
   // ---------- Defaults for NEW tanks ----------
   static const double _defaultIdealTempMinC = 0.0;
-  static const double _defaultIdealTempMaxC = 100.0;
+  static const double _defaultIdealTempMaxC = 43.0;
 
   static const double _defaultIdealPhMin = 0.0;
   static const double _defaultIdealPhMax = 14.0;
 
   static const double _defaultIdealTdsMin = 0.0;
-  static const double _defaultIdealTdsMax = 5000.0;
+  static const double _defaultIdealTdsMax = 1500.0;
 
   @override
   void initState() {
@@ -96,8 +68,6 @@ class _HomePageState extends State<HomePage> {
         .stream(primaryKey: ['id'])
         .order('created_at');
 
-    _searchCtrl.addListener(() => setState(() {}));
-
     AppSettings.load();
 
     WidgetsBinding.instance.addPostFrameCallback(
@@ -105,11 +75,12 @@ class _HomePageState extends State<HomePage> {
     );
 
     _loadLayoutMode();
+    _loadCachedTanks();
+    _syncOfflineQueue();
   }
 
   @override
   void dispose() {
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -175,6 +146,114 @@ class _HomePageState extends State<HomePage> {
 
   InputDecoration _rangeDeco(String label) => _pillDeco(label);
 
+  String _specUnitLabel(TankParameterSpec spec, String tempUnit) {
+    return spec.isTemperature ? tempUnit : spec.unitLabel;
+  }
+
+  String _formatRangeValue(TankParameterSpec spec, String raw) {
+    final value = _tryParseDouble(raw);
+    if (value == null) return '--';
+    return value.toStringAsFixed(spec.decimals);
+  }
+
+  String _rangeSummaryText(
+    TankParameterSpec spec,
+    TextEditingController minCtrl,
+    TextEditingController maxCtrl,
+    String tempUnit,
+  ) {
+    final minText = _formatRangeValue(spec, minCtrl.text);
+    final maxText = _formatRangeValue(spec, maxCtrl.text);
+    final unit = _specUnitLabel(spec, tempUnit);
+    return unit.isEmpty ? '$minText - $maxText' : '$minText - $maxText $unit';
+  }
+
+  double _sliderMinForSpec(TankParameterSpec spec, bool useF) {
+    if (!spec.isTemperature) return spec.editorMin;
+    return useF ? spec.editorMin : _fToC(spec.editorMin);
+  }
+
+  double _sliderMaxForSpec(TankParameterSpec spec, bool useF) {
+    if (!spec.isTemperature) return spec.editorMax;
+    return useF ? spec.editorMax : _fToC(spec.editorMax);
+  }
+
+  int _sliderDivisionsForSpec(TankParameterSpec spec, bool useF) {
+    if (!spec.isTemperature || useF) return spec.sliderDivisions;
+    return ((_sliderMaxForSpec(spec, false) - _sliderMinForSpec(spec, false)) *
+            2)
+        .round();
+  }
+
+  double _effectiveSliderMinForSpec(
+    TankParameterSpec spec,
+    TextEditingController minCtrl,
+    TextEditingController maxCtrl,
+    bool useF,
+  ) {
+    final baseMin = _sliderMinForSpec(spec, useF);
+    final currentMin = _tryParseDouble(minCtrl.text);
+    final currentMax = _tryParseDouble(maxCtrl.text);
+    return [baseMin, currentMin, currentMax]
+        .whereType<double>()
+        .reduce((a, b) => a < b ? a : b);
+  }
+
+  double _effectiveSliderMaxForSpec(
+    TankParameterSpec spec,
+    TextEditingController minCtrl,
+    TextEditingController maxCtrl,
+    bool useF,
+  ) {
+    final baseMax = _sliderMaxForSpec(spec, useF);
+    final currentMin = _tryParseDouble(minCtrl.text);
+    final currentMax = _tryParseDouble(maxCtrl.text);
+    return [baseMax, currentMin, currentMax]
+        .whereType<double>()
+        .reduce((a, b) => a > b ? a : b);
+  }
+
+  RangeValues _sliderValuesForSpec(
+    TankParameterSpec spec,
+    TextEditingController minCtrl,
+    TextEditingController maxCtrl,
+    bool useF,
+  ) {
+    final sliderMin = _effectiveSliderMinForSpec(
+      spec,
+      minCtrl,
+      maxCtrl,
+      useF,
+    );
+    final sliderMax = _effectiveSliderMaxForSpec(
+      spec,
+      minCtrl,
+      maxCtrl,
+      useF,
+    );
+    final minValue = (_tryParseDouble(minCtrl.text) ?? sliderMin).clamp(
+      sliderMin,
+      sliderMax,
+    );
+    final maxValue = (_tryParseDouble(maxCtrl.text) ?? sliderMax).clamp(
+      sliderMin,
+      sliderMax,
+    );
+    final start = minValue <= maxValue ? minValue : maxValue;
+    final end = maxValue >= minValue ? maxValue : minValue;
+    return RangeValues(start.toDouble(), end.toDouble());
+  }
+
+  void _writeSliderValues(
+    TankParameterSpec spec,
+    TextEditingController minCtrl,
+    TextEditingController maxCtrl,
+    RangeValues values,
+  ) {
+    minCtrl.text = values.start.toStringAsFixed(spec.decimals);
+    maxCtrl.text = values.end.toStringAsFixed(spec.decimals);
+  }
+
   Future<void> _maybeShowWalkthrough() async {
     final seen = await WalkthroughScreen.hasSeen();
     if (seen || !mounted) return;
@@ -200,20 +279,57 @@ class _HomePageState extends State<HomePage> {
 
   double? _tryParseDouble(String s) => double.tryParse(s.trim());
 
+  Future<void> _loadCachedTanks() async {
+    final uid = _supa.auth.currentUser?.id;
+    if (uid == null) return;
+
+    final cached = await OfflineStore.instance.getCachedTanks(uid);
+    if (!mounted || cached.isEmpty) return;
+
+    setState(() {
+      _latestTanks = cached;
+    });
+  }
+
+  Future<void> _syncOfflineQueue() async {
+    try {
+      final changed = await OfflineStore.instance.syncPending(_supa);
+      if (changed && mounted) {
+        final uid = _supa.auth.currentUser?.id;
+        if (uid != null) {
+          final cached = await OfflineStore.instance.getCachedTanks(uid);
+          setState(() {
+            _latestTanks = cached;
+            _refreshTick++;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<int> _fetchTankCountForCurrentUser() async {
     final uid = _supa.auth.currentUser?.id;
     if (uid == null) return 0;
 
-    final rows = await _supa.from('tanks').select('id').eq('user_id', uid);
-    return (rows as List).length;
+    try {
+      final rows = await _supa.from('tanks').select('id').eq('user_id', uid);
+      return (rows as List).length;
+    } catch (_) {
+      final cached = await OfflineStore.instance.getCachedTanks(uid);
+      return cached.length;
+    }
   }
 
   Future<int> _fetchMeasurementCountForTank(String tankId) async {
-    final rows = await _supa
-        .from('sensor_readings')
-        .select('id')
-        .eq('tank_id', tankId);
-    return (rows as List).length;
+    try {
+      final rows = await _supa
+          .from('sensor_readings')
+          .select('id')
+          .eq('tank_id', tankId);
+      return (rows as List).length;
+    } catch (_) {
+      return OfflineStore.instance.cachedReadingCount(tankId);
+    }
   }
 
   Future<bool> _tankMeasurementLimitReached(String tankId) async {
@@ -277,6 +393,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _refreshHome() async {
+    await _syncOfflineQueue();
     await _retryLoadTanks();
 
     // refresh other "non-stream" data that people expect to update
@@ -663,27 +780,38 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSearchField() {
-    return TextField(
-      controller: _searchCtrl,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        hintText: 'Search tanks',
-        hintStyle: const TextStyle(color: Colors.white70),
-        prefixIcon: const Icon(Icons.search, color: Colors.white70),
-        filled: true,
-        fillColor: const Color(0xFF0b1220),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 12,
-          horizontal: 12,
-        ),
-      ),
+  Tank _tankFromRow(Map<String, dynamic> row) {
+    final gallons = (row['volume_gallons'] as num?)?.toDouble() ?? 0;
+    final rawImageUrl = (row['image_url'] as String?)?.trim();
+    final imageUrl =
+        (rawImageUrl == null || rawImageUrl.isEmpty || rawImageUrl == 'NULL')
+            ? null
+            : rawImageUrl;
+
+    return Tank(
+      id: (row['id'] ?? '').toString(),
+      name: (row['name'] ?? 'Tank').toString(),
+      volumeLiters: gallons * 3.785411784,
+      inhabitants: ((row['water_type'] ?? 'freshwater') as String)
+          .replaceFirstMapped(
+            RegExp(r'^\w'),
+            (match) => match.group(0)!.toUpperCase(),
+          ),
+      imageUrl: imageUrl,
+      waterType: (row['water_type'] ?? 'freshwater').toString(),
+      tracking: trackingMapFromRow(row),
+      idealRanges: idealRangeMapFromRow(row),
     );
+  }
+
+  Future<void> _openTankSearch() async {
+    await showSearch<Map<String, dynamic>?>(
+      context: context,
+      delegate: _TankSearchDelegate(tanks: _latestTanks),
+    ).then((selected) {
+      if (selected == null || !mounted) return;
+      _openTankDetail(_tankFromRow(selected));
+    });
   }
 
   IconData _iconForLayout(LayoutMode m) {
@@ -708,33 +836,18 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Widget _layoutToggle() {
-    return Tooltip(
-      message: _hintForNextLayout(),
-      child: InkWell(
-        onTap: () async {
-          setState(() {
-            if (_layout == LayoutMode.grid2) {
-              _layout = LayoutMode.list;
-            } else if (_layout == LayoutMode.list) {
-              _layout = LayoutMode.cards;
-            } else {
-              _layout = LayoutMode.grid2;
-            }
-          });
+  Future<void> _cycleLayout() async {
+    setState(() {
+      if (_layout == LayoutMode.grid2) {
+        _layout = LayoutMode.list;
+      } else if (_layout == LayoutMode.list) {
+        _layout = LayoutMode.cards;
+      } else {
+        _layout = LayoutMode.grid2;
+      }
+    });
 
-          await _saveLayoutMode();
-        },
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0b1220),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(_iconForLayout(_layout), color: Colors.white),
-        ),
-      ),
-    );
+    await _saveLayoutMode();
   }
 
   Future<void> _openAssistantSheet() async {
@@ -1192,50 +1305,59 @@ class _HomePageState extends State<HomePage> {
     final nameCtrl = TextEditingController();
     final volumeCtrl = TextEditingController();
     String waterType = 'freshwater';
-
-    // Ideal ranges controllers
-    final idealTempMinCtrl = TextEditingController();
-    final idealTempMaxCtrl = TextEditingController();
-    final idealPhMinCtrl = TextEditingController(
-      text: _defaultIdealPhMin.toStringAsFixed(1),
-    );
-    final idealPhMaxCtrl = TextEditingController(
-      text: _defaultIdealPhMax.toStringAsFixed(1),
-    );
-    final idealTdsMinCtrl = TextEditingController(
-      text: _defaultIdealTdsMin.toStringAsFixed(0),
-    );
-    final idealTdsMaxCtrl = TextEditingController(
-      text: _defaultIdealTdsMax.toStringAsFixed(0),
-    );
+    final tracking = {
+      for (final spec in kTankParameterSpecs) spec.type: spec.defaultTracked,
+    };
+    final minCtrls = {
+      for (final spec in kTankParameterSpecs)
+        spec.type: TextEditingController(
+          text:
+              spec.isTemperature
+                  ? ''
+                  : spec.defaultMin.toStringAsFixed(spec.decimals),
+        ),
+    };
+    final maxCtrls = {
+      for (final spec in kTankParameterSpecs)
+        spec.type: TextEditingController(
+          text:
+              spec.isTemperature
+                  ? ''
+                  : spec.defaultMax.toStringAsFixed(spec.decimals),
+        ),
+    };
 
     bool lastUseF = AppSettings.useFahrenheit.value;
 
     if (lastUseF) {
-      idealTempMinCtrl.text = _cToF(
+      minCtrls[ParamType.temperature]!.text = _cToF(
         _defaultIdealTempMinC,
-      ).toStringAsFixed(0); // 32
-      idealTempMaxCtrl.text = _cToF(
+      ).toStringAsFixed(0);
+      maxCtrls[ParamType.temperature]!.text = _cToF(
         _defaultIdealTempMaxC,
-      ).toStringAsFixed(0); // 212
+      ).toStringAsFixed(0);
     } else {
-      idealTempMinCtrl.text = _defaultIdealTempMinC.toStringAsFixed(0); // 0
-      idealTempMaxCtrl.text = _defaultIdealTempMaxC.toStringAsFixed(0); // 100
+      minCtrls[ParamType.temperature]!.text = _defaultIdealTempMinC
+          .toStringAsFixed(0);
+      maxCtrls[ParamType.temperature]!.text = _defaultIdealTempMaxC
+          .toStringAsFixed(0);
     }
 
     double? _tryD(TextEditingController c) => _tryParseDouble(c.text);
 
     void _syncTempFields(bool useF) {
-      final minVal = _tryD(idealTempMinCtrl);
-      final maxVal = _tryD(idealTempMaxCtrl);
+      final minCtrl = minCtrls[ParamType.temperature]!;
+      final maxCtrl = maxCtrls[ParamType.temperature]!;
+      final minVal = _tryD(minCtrl);
+      final maxVal = _tryD(maxCtrl);
 
       if (minVal != null) {
         final next = useF ? _cToF(minVal) : _fToC(minVal);
-        idealTempMinCtrl.text = next.toStringAsFixed(0);
+        minCtrl.text = next.toStringAsFixed(0);
       }
       if (maxVal != null) {
         final next = useF ? _cToF(maxVal) : _fToC(maxVal);
-        idealTempMaxCtrl.text = next.toStringAsFixed(0);
+        maxCtrl.text = next.toStringAsFixed(0);
       }
     }
 
@@ -1276,6 +1398,441 @@ class _HomePageState extends State<HomePage> {
                                 ? 'Enter tank size in gallons'
                                 : 'Enter tank size in liters';
                         final tempUnit = useF ? '°F' : '°C';
+
+                        final trackedSpecs =
+                            kTankParameterSpecs
+                                .where((spec) => tracking[spec.type] ?? false)
+                                .toList();
+
+                        Future<void> openTrackingManager() async {
+                          await showModalBottomSheet<void>(
+                            context: ctx,
+                            backgroundColor: const Color(0xFF1f2937),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(16),
+                              ),
+                            ),
+                            builder: (managerCtx) {
+                              return StatefulBuilder(
+                                builder: (managerCtx, setManagerState) {
+                                  return Padding(
+                                    padding: EdgeInsets.only(
+                                      left: 16,
+                                      right: 16,
+                                      top: 16,
+                                      bottom:
+                                          MediaQuery.of(
+                                            managerCtx,
+                                          ).viewInsets.bottom +
+                                          16,
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Manage tracked parameters',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        const Text(
+                                          'Choose what shows up below. Tap a parameter card to edit its ideal range.',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            for (final spec
+                                                in kTankParameterSpecs)
+                                              FilterChip(
+                                                avatar: Icon(
+                                                  spec.icon,
+                                                  size: 16,
+                                                  color: spec.color,
+                                                ),
+                                                label: Text(spec.label),
+                                                selected:
+                                                    tracking[spec.type] ??
+                                                    false,
+                                                selectedColor: RotalaColors.teal
+                                                    .withValues(alpha: 0.25),
+                                                checkmarkColor: Colors.white,
+                                                labelStyle: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                                backgroundColor: const Color(
+                                                  0xFF0b1220,
+                                                ),
+                                                side: BorderSide(
+                                                  color: spec.color.withValues(
+                                                    alpha: 0.45,
+                                                  ),
+                                                ),
+                                                onSelected: (selected) {
+                                                  setManagerState(() {
+                                                    tracking[spec.type] =
+                                                        selected;
+                                                  });
+                                                  setStateSheet(() {});
+                                                },
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: FilledButton(
+                                            onPressed:
+                                                () => Navigator.pop(managerCtx),
+                                            child: const Text('Done'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          );
+
+                          setStateSheet(() {});
+                        }
+
+                        Future<void> openRangeEditor(
+                          TankParameterSpec spec,
+                        ) async {
+                          final minCtrl = minCtrls[spec.type]!;
+                          final maxCtrl = maxCtrls[spec.type]!;
+                          final unit = _specUnitLabel(spec, tempUnit);
+
+                          await showModalBottomSheet<void>(
+                            context: ctx,
+                            isScrollControlled: true,
+                            backgroundColor: const Color(0xFF1f2937),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(16),
+                              ),
+                            ),
+                            builder: (editorCtx) {
+                              return StatefulBuilder(
+                                builder: (editorCtx, setEditorState) {
+                                  final sliderValues = _sliderValuesForSpec(
+                                    spec,
+                                    minCtrl,
+                                    maxCtrl,
+                                    useF,
+                                  );
+                                  final sliderMin =
+                                      _effectiveSliderMinForSpec(
+                                    spec,
+                                    minCtrl,
+                                    maxCtrl,
+                                    useF,
+                                  );
+                                  final sliderMax =
+                                      _effectiveSliderMaxForSpec(
+                                    spec,
+                                    minCtrl,
+                                    maxCtrl,
+                                    useF,
+                                  );
+                                  return Padding(
+                                    padding: EdgeInsets.only(
+                                      left: 16,
+                                      right: 16,
+                                      top: 16,
+                                      bottom:
+                                          MediaQuery.of(
+                                            editorCtx,
+                                          ).viewInsets.bottom +
+                                          16,
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              width: 40,
+                                              height: 40,
+                                              decoration: BoxDecoration(
+                                                color: spec.color.withValues(
+                                                  alpha: 0.16,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Icon(
+                                                spec.icon,
+                                                color: spec.color,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    spec.label,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 18,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    'Ideal range: ${_rangeSummaryText(spec, minCtrl, maxCtrl, tempUnit)}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 10,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFF0b1220,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(14),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'Min',
+                                                      style: TextStyle(
+                                                        color: Colors.white54,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    TextField(
+                                                      controller: minCtrl,
+                                                      keyboardType:
+                                                          const TextInputType.numberWithOptions(
+                                                            decimal: true,
+                                                          ),
+                                                      onChanged:
+                                                          (_) => setEditorState(
+                                                            () {},
+                                                          ),
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 18,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                      decoration: InputDecoration(
+                                                        isDense: true,
+                                                        border:
+                                                            InputBorder.none,
+                                                        contentPadding:
+                                                            EdgeInsets.zero,
+                                                        suffixText:
+                                                            unit.isEmpty
+                                                                ? null
+                                                                : unit,
+                                                        suffixStyle:
+                                                            const TextStyle(
+                                                              color: Colors
+                                                                  .white,
+                                                              fontSize: 18,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 10,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFF0b1220,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(14),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    const Text(
+                                                      'Max',
+                                                      style: TextStyle(
+                                                        color: Colors.white54,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    TextField(
+                                                      controller: maxCtrl,
+                                                      keyboardType:
+                                                          const TextInputType.numberWithOptions(
+                                                            decimal: true,
+                                                          ),
+                                                      onChanged:
+                                                          (_) => setEditorState(
+                                                            () {},
+                                                          ),
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 18,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                      decoration: InputDecoration(
+                                                        isDense: true,
+                                                        border:
+                                                            InputBorder.none,
+                                                        contentPadding:
+                                                            EdgeInsets.zero,
+                                                        suffixText:
+                                                            unit.isEmpty
+                                                                ? null
+                                                                : unit,
+                                                        suffixStyle:
+                                                            const TextStyle(
+                                                              color: Colors
+                                                                  .white,
+                                                              fontSize: 18,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 14),
+                                        SliderTheme(
+                                          data: SliderTheme.of(editorCtx)
+                                              .copyWith(
+                                                activeTrackColor: spec.color,
+                                                inactiveTrackColor: spec.color
+                                                    .withValues(alpha: 0.20),
+                                                thumbColor: spec.color,
+                                                overlayColor: spec.color
+                                                    .withValues(alpha: 0.18),
+                                                rangeThumbShape:
+                                                    const RoundRangeSliderThumbShape(
+                                                      enabledThumbRadius: 8,
+                                                    ),
+                                              ),
+                                          child: RangeSlider(
+                                            min: sliderMin,
+                                            max: sliderMax,
+                                            divisions:
+                                                _sliderDivisionsForSpec(
+                                                  spec,
+                                                  useF,
+                                                ),
+                                            labels: RangeLabels(
+                                              sliderValues.start
+                                                  .toStringAsFixed(
+                                                    spec.decimals,
+                                                  ),
+                                              sliderValues.end.toStringAsFixed(
+                                                spec.decimals,
+                                              ),
+                                            ),
+                                            values: sliderValues,
+                                            onChanged: (values) {
+                                              _writeSliderValues(
+                                                spec,
+                                                minCtrl,
+                                                maxCtrl,
+                                                values,
+                                              );
+                                              setEditorState(() {});
+                                            },
+                                          ),
+                                        ),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              sliderMin.toStringAsFixed(
+                                                spec.decimals,
+                                              ),
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            const Spacer(),
+                                            Text(
+                                              sliderMax.toStringAsFixed(
+                                                spec.decimals,
+                                              ),
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: FilledButton(
+                                            onPressed:
+                                                () => Navigator.pop(editorCtx),
+                                            child: const Text('Done'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          );
+
+                          setStateSheet(() {});
+                        }
 
                         return SingleChildScrollView(
                           child: Column(
@@ -1410,110 +1967,177 @@ class _HomePageState extends State<HomePage> {
 
                               const SizedBox(height: 18),
 
-                              _sectionHeader(Icons.tune, 'Ideal ranges'),
+                              _sectionHeader(
+                                Icons.checklist_rounded,
+                                'Tracked parameters',
+                              ),
                               const SizedBox(height: 10),
-
                               Row(
                                 children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealTempMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                      decoration: _rangeDeco(
-                                        'Temp min ($tempUnit)',
-                                      ),
+                                  const Expanded(
+                                    child: Text(
+                                      'Tap a tracked parameter to edit its ideal range.',
+                                      style: TextStyle(color: Colors.white70),
                                     ),
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealTempMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                      decoration: _rangeDeco(
-                                        'Temp max ($tempUnit)',
-                                      ),
+                                  const SizedBox(width: 12),
+                                  OutlinedButton.icon(
+                                    onPressed: openTrackingManager,
+                                    icon: const Icon(
+                                      Icons.tune_rounded,
+                                      size: 18,
                                     ),
+                                    label: const Text('Manage'),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
-
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealPhMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                      decoration: _rangeDeco('pH min'),
-                                    ),
+                              const SizedBox(height: 12),
+                              if (trackedSpecs.isEmpty)
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0b1220),
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(color: Colors.white12),
                                   ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealPhMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'No tracked parameters yet',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                      decoration: _rangeDeco('pH max'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 10),
-
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealTdsMinCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      const SizedBox(height: 6),
+                                      const Text(
+                                        'Choose the parameters you care about most, then tap each one to set its target range.',
+                                        style: TextStyle(color: Colors.white70),
                                       ),
-                                      decoration: _rangeDeco('TDS min (ppm)'),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: idealTdsMaxCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      const SizedBox(height: 12),
+                                      FilledButton.tonal(
+                                        onPressed: openTrackingManager,
+                                        child: const Text('Choose parameters'),
                                       ),
-                                      decoration: _rangeDeco('TDS max (ppm)'),
-                                    ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                )
+                              else
+                                GridView.builder(
+                                  shrinkWrap: true,
+                                  physics:
+                                      const NeverScrollableScrollPhysics(),
+                                  itemCount: trackedSpecs.length,
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 2,
+                                        mainAxisSpacing: 10,
+                                        crossAxisSpacing: 10,
+                                        childAspectRatio: 2.35,
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final spec = trackedSpecs[index];
+                                    return Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(18),
+                                        onTap: () => openRangeEditor(spec),
+                                        child: Ink(
+                                          decoration: BoxDecoration(
+                                            color: spec.color.withValues(
+                                              alpha: 0.10,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              18,
+                                            ),
+                                            border: Border.all(
+                                              color: spec.color.withValues(
+                                                alpha: 0.7,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 30,
+                                                      height: 30,
+                                                      decoration: BoxDecoration(
+                                                        color: spec.color
+                                                            .withValues(
+                                                              alpha: 0.16,
+                                                            ),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              9,
+                                                            ),
+                                                      ),
+                                                      child: Icon(
+                                                        spec.icon,
+                                                        color: spec.color,
+                                                        size: 16,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Expanded(
+                                                      child: Text(
+                                                        spec.label,
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow
+                                                                .ellipsis,
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    const Icon(
+                                                      Icons.chevron_right,
+                                                      color: Colors.white54,
+                                                      size: 18,
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  _rangeSummaryText(
+                                                    spec,
+                                                    minCtrls[spec.type]!,
+                                                    maxCtrls[spec.type]!,
+                                                    tempUnit,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
 
                               const SizedBox(height: 18),
 
@@ -1545,6 +2169,11 @@ class _HomePageState extends State<HomePage> {
                                         try {
                                           final uid =
                                               _supa.auth.currentUser!.id;
+                                          final tankId = const Uuid().v4();
+                                          final createdAt =
+                                              DateTime.now()
+                                                  .toUtc()
+                                                  .toIso8601String();
                                           final tankCount =
                                               await _fetchTankCountForCurrentUser();
                                           if (tankCount >= _kMaxTanksPerUser) {
@@ -1556,10 +2185,27 @@ class _HomePageState extends State<HomePage> {
                                           }
 
                                           String? imageUrl;
-                                          if (_pendingImageBytes != null) {
-                                            imageUrl = await _uploadTankImage(
+                                          String? pendingImageBase64;
+                                          String imageExtension = 'jpg';
+                                          if (_pendingImageBytes != null &&
+                                              _pendingImageBytes!.isNotEmpty) {
+                                            pendingImageBase64 = base64Encode(
                                               _pendingImageBytes!,
                                             );
+                                            final parts = (_pendingImageName ??
+                                                    '')
+                                                .split('.');
+                                            if (parts.length > 1) {
+                                              imageExtension =
+                                                  parts.last.toLowerCase();
+                                            }
+                                            try {
+                                              imageUrl = await _uploadTankImage(
+                                                _pendingImageBytes!,
+                                              );
+                                            } catch (_) {
+                                              imageUrl = null;
+                                            }
                                           }
 
                                           final raw = double.parse(
@@ -1579,59 +2225,75 @@ class _HomePageState extends State<HomePage> {
                                             gallons = liters / 3.785411784;
                                           }
 
-                                          final tMinDisplay = _tryD(
-                                            idealTempMinCtrl,
-                                          );
-                                          final tMaxDisplay = _tryD(
-                                            idealTempMaxCtrl,
-                                          );
-
-                                          final idealTempMinF =
-                                              tMinDisplay == null
-                                                  ? null
-                                                  : (useF
-                                                      ? tMinDisplay
-                                                      : _cToF(tMinDisplay));
-                                          final idealTempMaxF =
-                                              tMaxDisplay == null
-                                                  ? null
-                                                  : (useF
-                                                      ? tMaxDisplay
-                                                      : _cToF(tMaxDisplay));
-
-                                          await _supa.from('tanks').insert({
+                                          final payload = <String, dynamic>{
+                                            'id': tankId,
                                             'user_id': uid,
+                                            'created_at': createdAt,
                                             'name': nameCtrl.text.trim(),
                                             'water_type': waterType,
                                             'volume_liters': liters,
                                             'volume_gallons': gallons,
                                             if (imageUrl != null)
                                               'image_url': imageUrl,
-                                            'ideal_temp_min': idealTempMinF,
-                                            'ideal_temp_max': idealTempMaxF,
-                                            'ideal_ph_min': _tryD(
-                                              idealPhMinCtrl,
-                                            ),
-                                            'ideal_ph_max': _tryD(
-                                              idealPhMaxCtrl,
-                                            ),
-                                            'ideal_tds_min': _tryD(
-                                              idealTdsMinCtrl,
-                                            ),
-                                            'ideal_tds_max': _tryD(
-                                              idealTdsMaxCtrl,
-                                            ),
-                                          });
+                                          };
+
+                                          for (final spec
+                                              in kTankParameterSpecs) {
+                                            payload[spec.trackingField] =
+                                                tracking[spec.type] ?? false;
+
+                                            final minVal = _tryD(
+                                              minCtrls[spec.type]!,
+                                            );
+                                            final maxVal = _tryD(
+                                              maxCtrls[spec.type]!,
+                                            );
+
+                                            payload[spec.minField] =
+                                                spec.isTemperature
+                                                    ? (minVal == null
+                                                        ? null
+                                                        : (useF
+                                                            ? minVal
+                                                            : _cToF(minVal)))
+                                                    : minVal;
+                                            payload[spec.maxField] =
+                                                spec.isTemperature
+                                                    ? (maxVal == null
+                                                        ? null
+                                                        : (useF
+                                                            ? maxVal
+                                                            : _cToF(maxVal)))
+                                                    : maxVal;
+                                          }
+
+                                          final result = await OfflineStore
+                                              .instance
+                                              .saveTank(
+                                                client: _supa,
+                                                userId: uid,
+                                                payload: payload,
+                                                pendingImageBase64:
+                                                    pendingImageBase64,
+                                                imageExtension: imageExtension,
+                                              );
 
                                           if (mounted) {
                                             Navigator.pop(ctx, true);
                                             ScaffoldMessenger.of(
                                               context,
                                             ).showSnackBar(
-                                              const SnackBar(
-                                                content: Text('Tank added'),
+                                              SnackBar(
+                                                content: Text(
+                                                  result ==
+                                                          OfflineSaveResult
+                                                              .synced
+                                                      ? 'Tank added'
+                                                      : 'Tank saved offline and will sync when you reconnect',
+                                                ),
                                               ),
                                             );
+                                            await _loadCachedTanks();
                                           }
                                         } catch (e) {
                                           if (mounted) {
@@ -1671,16 +2333,34 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _openManualEntrySheet() async {
     try {
-      final tanks = await _supa
-          .from('tanks')
-          .select('id,name')
-          .order('created_at');
+      final uid = _supa.auth.currentUser?.id;
+      List<dynamic> tanks;
+      try {
+        await _syncOfflineQueue();
+        tanks = await _supa
+            .from('tanks')
+            .select(
+              'id,name,'
+              'tracking_temperature,tracking_ph,tracking_ammonia,tracking_nitrite,tracking_nitrate,'
+              'tracking_gh,tracking_kh,tracking_tds,tracking_co2,tracking_salinity,'
+              'tracking_alkalinity,tracking_calcium,tracking_magnesium,tracking_phosphate',
+            )
+            .order('created_at');
+      } catch (_) {
+        tanks =
+            uid == null
+                ? const []
+                : await OfflineStore.instance.getCachedTanks(uid);
+      }
       if (!mounted) return;
 
-      String? tankId = tanks.isNotEmpty ? tanks.first['id'] as String : null;
-      final phCtrl = TextEditingController();
-      final tdsCtrl = TextEditingController();
-      final tempCtrl = TextEditingController();
+      final tankRows = tanks.cast<Map<String, dynamic>>();
+      String? tankId =
+          tankRows.isNotEmpty ? tankRows.first['id'] as String : null;
+      final valueCtrls = {
+        for (final spec in kTankParameterSpecs)
+          spec.type: TextEditingController(),
+      };
 
       await showModalBottomSheet<void>(
         context: context,
@@ -1699,6 +2379,28 @@ class _HomePageState extends State<HomePage> {
             ),
             child: StatefulBuilder(
               builder: (ctx, setSheet) {
+                if (tankRows.isEmpty) {
+                  return const SizedBox(
+                    height: 120,
+                    child: Center(
+                      child: Text(
+                        'Add a tank before recording measurements.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  );
+                }
+
+                final selectedTank = tankRows.firstWhere(
+                  (tank) => tank['id'] == tankId,
+                  orElse: () => tankRows.first,
+                );
+                final tracking = trackingMapFromRow(selectedTank);
+                final visibleSpecs =
+                    kTankParameterSpecs
+                        .where((spec) => tracking[spec.type] ?? false)
+                        .toList();
+
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1716,7 +2418,7 @@ class _HomePageState extends State<HomePage> {
                       value: tankId,
                       dropdownColor: const Color(0xFF1f2937),
                       items: [
-                        for (final t in tanks)
+                        for (final t in tankRows)
                           DropdownMenuItem(
                             value: t['id'] as String,
                             child: Text(t['name']?.toString() ?? 'Tank'),
@@ -1729,37 +2431,47 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: phCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
+                    if (visibleSpecs.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          'This tank is not tracking any parameters yet.',
+                          style: TextStyle(color: Colors.white70),
+                        ),
                       ),
-                      decoration: const InputDecoration(labelText: 'pH'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: tdsCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(labelText: 'TDS ppm'),
-                    ),
-                    const SizedBox(height: 8),
-                    ValueListenableBuilder<bool>(
-                      valueListenable: AppSettings.useFahrenheit,
-                      builder: (context, useFahrenheit, _) {
-                        final unit = useFahrenheit ? '°F' : '°C';
-                        return TextField(
-                          controller: tempCtrl,
+                    for (final spec in visibleSpecs) ...[
+                      if (spec.isTemperature)
+                        ValueListenableBuilder<bool>(
+                          valueListenable: AppSettings.useFahrenheit,
+                          builder: (context, useFahrenheit, _) {
+                            final unit = useFahrenheit ? 'F' : 'C';
+                            return TextField(
+                              controller: valueCtrls[spec.type],
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                labelText: '${spec.label} $unit',
+                              ),
+                            );
+                          },
+                        )
+                      else
+                        TextField(
+                          controller: valueCtrls[spec.type],
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
                           decoration: InputDecoration(
-                            labelText: 'Temperature $unit',
+                            labelText:
+                                spec.unitLabel.isEmpty
+                                    ? spec.label
+                                    : '${spec.label} ${spec.unitLabel}',
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      const SizedBox(height: 8),
+                    ],
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
@@ -1781,40 +2493,36 @@ class _HomePageState extends State<HomePage> {
                                       return;
                                     }
 
-                                    await _supa.from('sensor_readings').insert({
+                                    final payload = <String, dynamic>{
+                                      'id': const Uuid().v4(),
                                       'tank_id': selectedTankId,
                                       'recorded_at':
                                           DateTime.now()
                                               .toUtc()
                                               .toIso8601String(),
                                       'device_uid': null,
-                                      if (phCtrl.text.trim().isNotEmpty)
-                                        'ph': double.tryParse(
-                                          phCtrl.text.trim(),
-                                        ),
-                                      if (tdsCtrl.text.trim().isNotEmpty)
-                                        'tds': double.tryParse(
-                                          tdsCtrl.text.trim(),
-                                        ),
-                                      if (tempCtrl.text.trim().isNotEmpty)
-                                        'temperature':
-                                            (() {
-                                              final displayVal =
-                                                  double.tryParse(
-                                                    tempCtrl.text.trim(),
-                                                  );
-                                              if (displayVal == null)
-                                                return null;
+                                    };
 
-                                              final useFahrenheitNow =
-                                                  AppSettings
-                                                      .useFahrenheit
-                                                      .value;
-                                              return useFahrenheitNow
-                                                  ? displayVal
-                                                  : _cToF(displayVal);
-                                            })(),
-                                    });
+                                    for (final spec in visibleSpecs) {
+                                      final raw =
+                                          valueCtrls[spec.type]!.text.trim();
+                                      if (raw.isEmpty) continue;
+                                      final parsed = double.tryParse(raw);
+                                      if (parsed == null) continue;
+                                      payload[spec.readingField] =
+                                          spec.isTemperature
+                                              ? (AppSettings.useFahrenheit.value
+                                                  ? parsed
+                                                  : _cToF(parsed))
+                                              : parsed;
+                                    }
+
+                                    final result = await OfflineStore.instance
+                                        .saveReading(
+                                          client: _supa,
+                                          tankId: selectedTankId,
+                                          payload: payload,
+                                        );
 
                                     if (mounted) Navigator.pop(ctx);
 
@@ -1822,8 +2530,12 @@ class _HomePageState extends State<HomePage> {
                                       ScaffoldMessenger.of(
                                         context,
                                       ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Reading added'),
+                                        SnackBar(
+                                          content: Text(
+                                            result == OfflineSaveResult.synced
+                                                ? 'Reading added'
+                                                : 'Reading saved offline and will sync when you reconnect',
+                                          ),
                                         ),
                                       );
                                     }
@@ -1913,283 +2625,240 @@ class _HomePageState extends State<HomePage> {
     return signed;
   }
 
-  void _exportCsvComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('CSV export is coming in a future update'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
   static String _fmtDateShort(DateTime d) {
     return '${d.year.toString().padLeft(4, '0')}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = _supa.auth.currentUser;
-    final firstName = _firstNameFromUser(user);
-    final title = firstName.isEmpty ? 'Welcome' : 'Welcome back, $firstName';
-
     return AppScaffold(
       currentIndex: 0,
-      title: title,
+      title: 'Dashboard',
+      leadingSecondary: IconButton(
+        tooltip: 'Search tanks',
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.search, color: Colors.white, size: 22),
+        onPressed: _openTankSearch,
+      ),
+      actions: [
+        IconButton(
+          tooltip: _hintForNextLayout(),
+          icon: Icon(_iconForLayout(_layout), color: Colors.white),
+          onPressed: _cycleLayout,
+        ),
+      ],
       aquaspecNamePrefix: 'AquaSpec',
       initialCredentials: const {'ssid': '', 'password': '', 'device_key': ''},
+      overlay: Positioned(
+        right: 16,
+        bottom: 92,
+        child: FloatingActionButton(
+          backgroundColor: RotalaColors.teal,
+          onPressed: _openAddTankSheet,
+          child: const Icon(Icons.add, size: 28, color: Colors.white),
+        ),
+      ),
       body: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                QuickActionsCard(
-                  tankStream: _tankStream,
-                  onOpenTasks: _openTasksSheet,
-                  onAddReading: _openManualEntrySheet,
-                  greetingName: firstName,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(child: _buildSearchField()),
-                    const SizedBox(width: 12),
-                    _layoutToggle(),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: RefreshIndicator(
-                    color: Colors.tealAccent,
-                    backgroundColor: const Color(0xFF111827),
-                    onRefresh: _refreshHome,
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: AppSettings.useFahrenheit,
-                      builder: (context, useFahrenheit, _) {
-                        return StreamBuilder<List<Map<String, dynamic>>>(
-                          key: ValueKey('tank_stream_$_refreshTick'),
-                          stream: _tankStream,
-                          builder: (context, snap) {
-                            if (snap.connectionState ==
-                                    ConnectionState.waiting &&
-                                !snap.hasData) {
-                              // needs to be scrollable for pull-to-refresh gesture
-                              return ListView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                children: const [
-                                  SizedBox(height: 140),
-                                  Center(child: CircularProgressIndicator()),
-                                ],
-                              );
-                            }
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: RefreshIndicator(
+              color: Colors.tealAccent,
+              backgroundColor: const Color(0xFF111827),
+              onRefresh: _refreshHome,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useFahrenheit,
+                builder: (context, useFahrenheit, _) {
+                  return StreamBuilder<List<Map<String, dynamic>>>(
+                    key: ValueKey('tank_stream_$_refreshTick'),
+                    stream: _tankStream,
+                    builder: (context, snap) {
+                      if (snap.hasData) {
+                        final remote =
+                            snap.data ?? const <Map<String, dynamic>>[];
+                        _latestTanks = remote;
+                        final uid = _supa.auth.currentUser?.id;
+                        if (uid != null) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            OfflineStore.instance.cacheTanks(uid, remote);
+                          });
+                        }
+                      }
 
-                            if (snap.hasError &&
-                                (snap.data == null ||
-                                    (snap.data?.isEmpty ?? true))) {
-                              final msg = snap.error.toString();
-                              final isOffline =
-                                  msg.contains('SocketException') ||
-                                  msg.contains('Failed host lookup');
-
-                              if (_retryingTanks) {
-                                return ListView(
-                                  physics:
-                                      const AlwaysScrollableScrollPhysics(),
-                                  children: [
-                                    const SizedBox(height: 140),
-                                    const Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Center(
-                                      child: Text(
-                                        isOffline
-                                            ? 'Reconnecting…'
-                                            : 'Trying again…',
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }
-
-                              return ListView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                children: [
-                                  const SizedBox(height: 90),
-                                  Icon(
-                                    isOffline
-                                        ? Icons.wifi_off
-                                        : Icons.error_outline,
-                                    color: Colors.white70,
-                                    size: 40,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    isOffline
-                                        ? 'Oops, looks like you are offline.'
-                                        : 'Something went wrong while loading tanks.',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Center(
-                                    child: TextButton.icon(
-                                      onPressed: _retryLoadTanks,
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Try again'),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            final all = snap.data ?? const [];
-
-                            if (_retryingTanks && all.isNotEmpty) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted)
-                                  setState(() => _retryingTanks = false);
-                              });
-                            }
-
-                            final q = _searchCtrl.text.trim().toLowerCase();
-                            final tanks =
-                                q.isEmpty
-                                    ? all
-                                    : all.where((row) {
-                                      final name =
-                                          (row['name'] ?? '')
-                                              .toString()
-                                              .toLowerCase();
-                                      return name.contains(q);
-                                    }).toList();
-
-                            if (tanks.isEmpty) {
-                              return ListView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                children: [
-                                  const SizedBox(height: 90),
-                                  Center(
-                                    child: TextButton.icon(
-                                      onPressed: _openAddTankSheet,
-                                      icon: const Icon(
-                                        Icons.add,
-                                        color: Colors.white,
-                                      ),
-                                      label: const Text(
-                                        'Add your first tank',
-                                        style: TextStyle(color: Colors.white),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            if (_layout == LayoutMode.cards) {
-                              // PageView isn't "pull-to-refresh"-friendly, so wrap in a scrollable parent.
-                              return ListView(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                padding: EdgeInsets.zero,
-                                children: [
-                                  SizedBox(
-                                    height:
-                                        MediaQuery.of(context).size.height *
-                                        0.62,
-                                    child: PageView.builder(
-                                      scrollDirection: Axis.vertical,
-                                      controller: PageController(
-                                        viewportFraction: 1.0,
-                                      ),
-                                      physics:
-                                          tanks.length == 1
-                                              ? const NeverScrollableScrollPhysics()
-                                              : const PageScrollPhysics(),
-                                      itemCount: tanks.length,
-                                      itemBuilder:
-                                          (_, i) => Padding(
-                                            padding: EdgeInsets.only(
-                                              bottom:
-                                                  i == tanks.length - 1
-                                                      ? 0
-                                                      : 12,
-                                            ),
-                                            child: TankCard(
-                                              row: tanks[i],
-                                              onOpen: _openTankDetail,
-                                              useFahrenheit: useFahrenheit,
-                                            ),
-                                          ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            if (_layout == LayoutMode.list) {
-                              return ListView.separated(
-                                physics: const AlwaysScrollableScrollPhysics(),
-                                itemCount: tanks.length,
-                                separatorBuilder:
-                                    (_, __) => const SizedBox(height: 12),
-                                itemBuilder:
-                                    (_, i) => TankListTile(
-                                      row: tanks[i],
-                                      onOpen: _openTankDetail,
-                                      useFahrenheit: useFahrenheit,
-                                    ),
-                              );
-                            }
-
-                            return GridView.builder(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 2,
-                                    mainAxisSpacing: 12,
-                                    crossAxisSpacing: 12,
-                                    childAspectRatio: 0.75,
-                                  ),
-                              itemCount: tanks.length,
-                              itemBuilder:
-                                  (_, i) => TankGridCard(
-                                    row: tanks[i],
-                                    onOpen: _openTankDetail,
-                                    useFahrenheit: useFahrenheit,
-                                  ),
-                            );
-                          },
+                      if (snap.connectionState == ConnectionState.waiting &&
+                          !snap.hasData &&
+                          _latestTanks.isEmpty) {
+                        // needs to be scrollable for pull-to-refresh gesture
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: const [
+                            SizedBox(height: 140),
+                            Center(child: CircularProgressIndicator()),
+                          ],
                         );
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 30),
-              ],
-            ),
-          ),
-          Positioned(
-            right: 16,
-            bottom: 72,
-            child: FloatingActionButton.extended(
-              backgroundColor: RotalaColors.teal,
-              onPressed: _openAddTankSheet,
-              icon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.add, size: 20, color: Colors.white),
-                  const SizedBox(width: 5),
-                  Icon(MdiIcons.fishbowlOutline, size: 30, color: Colors.white),
-                ],
+                      }
+
+                      if (snap.hasError &&
+                          (snap.data == null || (snap.data?.isEmpty ?? true)) &&
+                          _latestTanks.isEmpty) {
+                        final msg = snap.error.toString();
+                        final isOffline =
+                            msg.contains('SocketException') ||
+                            msg.contains('Failed host lookup');
+
+                        if (_retryingTanks) {
+                          return ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 140),
+                              const Center(child: CircularProgressIndicator()),
+                              const SizedBox(height: 12),
+                              Center(
+                                child: Text(
+                                  isOffline ? 'Reconnecting…' : 'Trying again…',
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            const SizedBox(height: 90),
+                            Icon(
+                              isOffline ? Icons.wifi_off : Icons.error_outline,
+                              color: Colors.white70,
+                              size: 40,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              isOffline
+                                  ? 'Oops, looks like you are offline.'
+                                  : 'Something went wrong while loading tanks.',
+                              style: const TextStyle(color: Colors.white70),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Center(
+                              child: TextButton.icon(
+                                onPressed: _retryLoadTanks,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Try again'),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      final all =
+                          snap.hasData ? (snap.data ?? const []) : _latestTanks;
+                      _latestTanks = all;
+
+                      if (_retryingTanks && all.isNotEmpty) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) setState(() => _retryingTanks = false);
+                        });
+                      }
+
+                      final tanks = all;
+
+                      if (tanks.isEmpty) {
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            const SizedBox(height: 90),
+                            Center(
+                              child: TextButton.icon(
+                                onPressed: _openAddTankSheet,
+                                icon: const Icon(
+                                  Icons.add,
+                                  color: Colors.white,
+                                ),
+                                label: const Text(
+                                  'Add your first tank',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      if (_layout == LayoutMode.cards) {
+                        // PageView isn't "pull-to-refresh"-friendly, so wrap in a scrollable parent.
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.only(bottom: 96),
+                          children: [
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.62,
+                              child: PageView.builder(
+                                scrollDirection: Axis.vertical,
+                                controller: PageController(
+                                  viewportFraction: 1.0,
+                                ),
+                                physics:
+                                    tanks.length == 1
+                                        ? const NeverScrollableScrollPhysics()
+                                        : const PageScrollPhysics(),
+                                itemCount: tanks.length,
+                                itemBuilder:
+                                    (_, i) => Padding(
+                                      padding: EdgeInsets.only(
+                                        bottom: i == tanks.length - 1 ? 0 : 12,
+                                      ),
+                                      child: TankCard(
+                                        row: tanks[i],
+                                        onOpen: _openTankDetail,
+                                        useFahrenheit: useFahrenheit,
+                                      ),
+                                    ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      if (_layout == LayoutMode.list) {
+                        return ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.only(bottom: 96),
+                          itemCount: tanks.length,
+                          separatorBuilder:
+                              (_, __) => const SizedBox(height: 12),
+                          itemBuilder:
+                              (_, i) => TankListTile(
+                                row: tanks[i],
+                                onOpen: _openTankDetail,
+                                useFahrenheit: useFahrenheit,
+                              ),
+                        );
+                      }
+
+                      return GridView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 96),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.75,
+                            ),
+                        itemCount: tanks.length,
+                        itemBuilder:
+                            (_, i) => TankGridCard(
+                              row: tanks[i],
+                              onOpen: _openTankDetail,
+                              useFahrenheit: useFahrenheit,
+                            ),
+                      );
+                    },
+                  );
+                },
               ),
-              label: const SizedBox.shrink(),
-              extendedPadding: const EdgeInsets.symmetric(horizontal: 10),
             ),
           ),
         ],
@@ -2215,3 +2884,115 @@ class _GlobalTask {
 }
 
 enum _TaskFilter { all, open, completed }
+
+class _TankSearchDelegate extends SearchDelegate<Map<String, dynamic>?> {
+  _TankSearchDelegate({required List<Map<String, dynamic>> tanks})
+    : _tanks = List.unmodifiable(tanks);
+
+  final List<Map<String, dynamic>> _tanks;
+
+  Iterable<Map<String, dynamic>> _filtered() {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return _tanks;
+
+    return _tanks.where((row) {
+      final name = (row['name'] ?? '').toString().toLowerCase();
+      return name.contains(q);
+    });
+  }
+
+  String _subtitle(Map<String, dynamic> row) {
+    final waterType = (row['water_type'] ?? 'freshwater').toString();
+    final volumeGallons = (row['volume_gallons'] as num?)?.toDouble() ?? 0;
+    final label =
+        waterType.isEmpty
+            ? 'Freshwater'
+            : '${waterType[0].toUpperCase()}${waterType.substring(1)}';
+    return '$label • ${volumeGallons.toStringAsFixed(0)} gal';
+  }
+
+  @override
+  ThemeData appBarTheme(BuildContext context) {
+    final base = Theme.of(context);
+    return base.copyWith(
+      appBarTheme: const AppBarTheme(backgroundColor: Color(0xFF0b1220)),
+      scaffoldBackgroundColor: const Color(0xFF0b1220),
+      inputDecorationTheme: const InputDecorationTheme(
+        hintStyle: TextStyle(color: Colors.white54),
+        border: InputBorder.none,
+      ),
+      textTheme: base.textTheme.apply(
+        bodyColor: Colors.white,
+        displayColor: Colors.white,
+      ),
+    );
+  }
+
+  @override
+  List<Widget>? buildActions(BuildContext context) {
+    return [
+      if (query.isNotEmpty)
+        IconButton(
+          tooltip: 'Clear search',
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => query = '',
+        ),
+    ];
+  }
+
+  @override
+  Widget? buildLeading(BuildContext context) {
+    return IconButton(
+      tooltip: 'Back',
+      icon: const Icon(Icons.arrow_back, color: Colors.white),
+      onPressed: () => close(context, null),
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) => _buildList();
+
+  @override
+  Widget buildSuggestions(BuildContext context) => _buildList();
+
+  Widget _buildList() {
+    final results = _filtered().toList();
+    if (results.isEmpty) {
+      return const Center(
+        child: Text('No tanks found.', style: TextStyle(color: Colors.white70)),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: results.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final row = results[index];
+        return ListTile(
+          tileColor: const Color(0xFF1f2937),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          leading: const CircleAvatar(
+            backgroundColor: Color(0xFF111827),
+            child: Icon(Icons.water, color: Colors.white70),
+          ),
+          title: Text(
+            (row['name'] ?? 'Tank').toString(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          subtitle: Text(
+            _subtitle(row),
+            style: const TextStyle(color: Colors.white70),
+          ),
+          trailing: const Icon(Icons.chevron_right, color: Colors.white70),
+          onTap: () => close(context, row),
+        );
+      },
+    );
+  }
+}

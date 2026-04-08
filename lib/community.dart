@@ -7,9 +7,11 @@ class CommunityPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      currentIndex: 3,
-      title: "Community",
-      body: const Center(child: Text("Community screen", style: TextStyle(color: Colors.white))),
+      currentIndex: 1,
+      title: 'Think Tank',
+      body: const Center(
+        child: Text('Think Tank screen', style: TextStyle(color: Colors.white)),
+      ),
     );
   }
 }

@@ -8,8 +8,10 @@ class ChatbotPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppScaffold(
       currentIndex: 2,
-      title: "Chatbot",
-      body: const Center(child: Text("Chatbot screen", style: TextStyle(color: Colors.white))),
+      title: 'RALA',
+      body: const Center(
+        child: Text('RALA screen', style: TextStyle(color: Colors.white)),
+      ),
     );
   }
 }
