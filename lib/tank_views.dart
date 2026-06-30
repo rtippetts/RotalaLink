@@ -228,61 +228,107 @@ class TankGridCard extends StatelessWidget {
 
     return InkWell(
       onTap: () => onOpen(tank),
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF1f2937),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // taller image to keep aspect pleasant in grid
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-              child: (imageUrl != null && imageUrl.isNotEmpty)
-                  ? Image.network(
-                      imageUrl,
-                      height: 120,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _tankPlaceholder(height: 120, width: double.infinity),
-                    )
-                  : _tankPlaceholder(height: 120, width: double.infinity),
+          color: const Color(0xFF182231),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 14,
+              offset: Offset(0, 8),
             ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: (imageUrl != null && imageUrl.isNotEmpty)
+                    ? Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _tankPlaceholder(),
+                      )
+                    : _tankPlaceholder(),
+              ),
+              const Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Color(0x14000000),
+                        Color(0xCC07111C),
+                        Color(0xF5091220),
+                      ],
+                      stops: [0.0, 0.45, 0.76, 1.0],
+                    ),
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: ValueListenableBuilder<bool>(
-                valueListenable: AppSettings.useGallons,
-                builder: (context, useGallons, _) {
-                  final volText = useGallons
-                      ? '${gallons.toStringAsFixed(0)} gal'
-                      : '${liters.toStringAsFixed(0)} L';
-                  return Text(
-                    '${_labelForWaterType(waterType)} • $volText',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  );
-                },
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 14,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: AppSettings.useGallons,
+                  builder: (context, useGallons, _) {
+                    final volText = useGallons
+                        ? '${gallons.toStringAsFixed(0)} gal'
+                        : '${liters.toStringAsFixed(0)} L';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            height: 1.05,
+                            shadows: [
+                              Shadow(
+                                color: Color(0x99000000),
+                                blurRadius: 10,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          '${_labelForWaterType(waterType)} • $volText',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFFD8E4F2),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(
+                                color: Color(0x80000000),
+                                blurRadius: 8,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -556,26 +602,43 @@ Widget _compactMetricText({
 
 /// Shared gray placeholder used in all layouts
 Widget _tankPlaceholder({
-  required double height,
-  required double width,
+  double? height,
+  double? width,
 }) {
-  return Container(
+  final placeholder = Container(
     height: height,
     width: width,
-    decoration: const BoxDecoration(
-      color: Color(0xFF1a1a1a),
-    ),
-    child: Center(
-      child: Opacity(
-        opacity: 0.5,
-        child: SizedBox(
-          height: height * 0.4, // logo is 40 percent of box height
+    decoration: const BoxDecoration(color: Color(0xFF101720)),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
           child: Image.asset(
-            'assets/brand/rotalafinalsquare2.png',
-            fit: BoxFit.contain,
+            'assets/brand/Image_placeholder.png',
+            fit: BoxFit.cover,
           ),
         ),
-      ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0x14000000),
+                Color(0x22000000),
+                Color(0x8A02070D),
+              ],
+              stops: [0.0, 0.55, 1.0],
+            ),
+          ),
+        ),
+      ],
     ),
   );
+
+  if (height == null && width == null) {
+    return placeholder;
+  }
+
+  return SizedBox(height: height, width: width, child: placeholder);
 }

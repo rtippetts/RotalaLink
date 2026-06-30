@@ -194,9 +194,11 @@ class _HomePageState extends State<HomePage> {
     final baseMin = _sliderMinForSpec(spec, useF);
     final currentMin = _tryParseDouble(minCtrl.text);
     final currentMax = _tryParseDouble(maxCtrl.text);
-    return [baseMin, currentMin, currentMax]
-        .whereType<double>()
-        .reduce((a, b) => a < b ? a : b);
+    return [
+      baseMin,
+      currentMin,
+      currentMax,
+    ].whereType<double>().reduce((a, b) => a < b ? a : b);
   }
 
   double _effectiveSliderMaxForSpec(
@@ -208,9 +210,11 @@ class _HomePageState extends State<HomePage> {
     final baseMax = _sliderMaxForSpec(spec, useF);
     final currentMin = _tryParseDouble(minCtrl.text);
     final currentMax = _tryParseDouble(maxCtrl.text);
-    return [baseMax, currentMin, currentMax]
-        .whereType<double>()
-        .reduce((a, b) => a > b ? a : b);
+    return [
+      baseMax,
+      currentMin,
+      currentMax,
+    ].whereType<double>().reduce((a, b) => a > b ? a : b);
   }
 
   RangeValues _sliderValuesForSpec(
@@ -219,18 +223,8 @@ class _HomePageState extends State<HomePage> {
     TextEditingController maxCtrl,
     bool useF,
   ) {
-    final sliderMin = _effectiveSliderMinForSpec(
-      spec,
-      minCtrl,
-      maxCtrl,
-      useF,
-    );
-    final sliderMax = _effectiveSliderMaxForSpec(
-      spec,
-      minCtrl,
-      maxCtrl,
-      useF,
-    );
+    final sliderMin = _effectiveSliderMinForSpec(spec, minCtrl, maxCtrl, useF);
+    final sliderMax = _effectiveSliderMaxForSpec(spec, minCtrl, maxCtrl, useF);
     final minValue = (_tryParseDouble(minCtrl.text) ?? sliderMin).clamp(
       sliderMin,
       sliderMax,
@@ -1533,15 +1527,13 @@ class _HomePageState extends State<HomePage> {
                                     maxCtrl,
                                     useF,
                                   );
-                                  final sliderMin =
-                                      _effectiveSliderMinForSpec(
+                                  final sliderMin = _effectiveSliderMinForSpec(
                                     spec,
                                     minCtrl,
                                     maxCtrl,
                                     useF,
                                   );
-                                  final sliderMax =
-                                      _effectiveSliderMaxForSpec(
+                                  final sliderMax = _effectiveSliderMaxForSpec(
                                     spec,
                                     minCtrl,
                                     maxCtrl,
@@ -1652,26 +1644,29 @@ class _HomePageState extends State<HomePage> {
                                                         fontWeight:
                                                             FontWeight.w700,
                                                       ),
-                                                      decoration: InputDecoration(
-                                                        isDense: true,
-                                                        border:
-                                                            InputBorder.none,
-                                                        contentPadding:
-                                                            EdgeInsets.zero,
-                                                        suffixText:
-                                                            unit.isEmpty
-                                                                ? null
-                                                                : unit,
-                                                        suffixStyle:
-                                                            const TextStyle(
-                                                              color: Colors
-                                                                  .white,
-                                                              fontSize: 18,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                            ),
-                                                      ),
+                                                      decoration:
+                                                          InputDecoration(
+                                                            isDense: true,
+                                                            border:
+                                                                InputBorder
+                                                                    .none,
+                                                            contentPadding:
+                                                                EdgeInsets.zero,
+                                                            suffixText:
+                                                                unit.isEmpty
+                                                                    ? null
+                                                                    : unit,
+                                                            suffixStyle:
+                                                                const TextStyle(
+                                                                  color:
+                                                                      Colors
+                                                                          .white,
+                                                                  fontSize: 18,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                ),
+                                                          ),
                                                     ),
                                                   ],
                                                 ),
@@ -1720,26 +1715,29 @@ class _HomePageState extends State<HomePage> {
                                                         fontWeight:
                                                             FontWeight.w700,
                                                       ),
-                                                      decoration: InputDecoration(
-                                                        isDense: true,
-                                                        border:
-                                                            InputBorder.none,
-                                                        contentPadding:
-                                                            EdgeInsets.zero,
-                                                        suffixText:
-                                                            unit.isEmpty
-                                                                ? null
-                                                                : unit,
-                                                        suffixStyle:
-                                                            const TextStyle(
-                                                              color: Colors
-                                                                  .white,
-                                                              fontSize: 18,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w700,
-                                                            ),
-                                                      ),
+                                                      decoration:
+                                                          InputDecoration(
+                                                            isDense: true,
+                                                            border:
+                                                                InputBorder
+                                                                    .none,
+                                                            contentPadding:
+                                                                EdgeInsets.zero,
+                                                            suffixText:
+                                                                unit.isEmpty
+                                                                    ? null
+                                                                    : unit,
+                                                            suffixStyle:
+                                                                const TextStyle(
+                                                                  color:
+                                                                      Colors
+                                                                          .white,
+                                                                  fontSize: 18,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w700,
+                                                                ),
+                                                          ),
                                                     ),
                                                   ],
                                                 ),
@@ -1749,27 +1747,28 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                         const SizedBox(height: 14),
                                         SliderTheme(
-                                          data: SliderTheme.of(editorCtx)
-                                              .copyWith(
-                                                activeTrackColor: spec.color,
-                                                inactiveTrackColor: spec.color
-                                                    .withValues(alpha: 0.20),
-                                                thumbColor: spec.color,
-                                                overlayColor: spec.color
-                                                    .withValues(alpha: 0.18),
-                                                rangeThumbShape:
-                                                    const RoundRangeSliderThumbShape(
-                                                      enabledThumbRadius: 8,
-                                                    ),
-                                              ),
+                                          data: SliderTheme.of(
+                                            editorCtx,
+                                          ).copyWith(
+                                            activeTrackColor: spec.color,
+                                            inactiveTrackColor: spec.color
+                                                .withValues(alpha: 0.20),
+                                            thumbColor: spec.color,
+                                            overlayColor: spec.color.withValues(
+                                              alpha: 0.18,
+                                            ),
+                                            rangeThumbShape:
+                                                const RoundRangeSliderThumbShape(
+                                                  enabledThumbRadius: 8,
+                                                ),
+                                          ),
                                           child: RangeSlider(
                                             min: sliderMin,
                                             max: sliderMax,
-                                            divisions:
-                                                _sliderDivisionsForSpec(
-                                                  spec,
-                                                  useF,
-                                                ),
+                                            divisions: _sliderDivisionsForSpec(
+                                              spec,
+                                              useF,
+                                            ),
                                             labels: RangeLabels(
                                               sliderValues.start
                                                   .toStringAsFixed(
@@ -2028,8 +2027,7 @@ class _HomePageState extends State<HomePage> {
                               else
                                 GridView.builder(
                                   shrinkWrap: true,
-                                  physics:
-                                      const NeverScrollableScrollPhysics(),
+                                  physics: const NeverScrollableScrollPhysics(),
                                   itemCount: trackedSpecs.length,
                                   gridDelegate:
                                       const SliverGridDelegateWithFixedCrossAxisCount(
@@ -2631,19 +2629,21 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return AppScaffold(
       currentIndex: 0,
       title: 'Dashboard',
       leadingSecondary: IconButton(
         tooltip: 'Search tanks',
         padding: EdgeInsets.zero,
-        icon: const Icon(Icons.search, color: Colors.white, size: 22),
+        icon: Icon(Icons.search, color: cs.onSurface, size: 22),
         onPressed: _openTankSearch,
       ),
       actions: [
         IconButton(
           tooltip: _hintForNextLayout(),
-          icon: Icon(_iconForLayout(_layout), color: Colors.white),
+          icon: Icon(_iconForLayout(_layout), color: cs.onSurface),
           onPressed: _cycleLayout,
         ),
       ],
@@ -2664,7 +2664,7 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: RefreshIndicator(
               color: Colors.tealAccent,
-              backgroundColor: const Color(0xFF111827),
+              backgroundColor: cs.surface,
               onRefresh: _refreshHome,
               child: ValueListenableBuilder<bool>(
                 valueListenable: AppSettings.useFahrenheit,

@@ -12,9 +12,8 @@ class ProfilePage extends StatelessWidget {
     if (user == null) return 'User';
 
     final md = user.userMetadata ?? {};
-    final displayName = (md['display_name'] ?? md['username'] ?? '')
-        .toString()
-        .trim();
+    final displayName =
+        (md['display_name'] ?? md['username'] ?? '').toString().trim();
     if (displayName.isNotEmpty) return displayName;
 
     final email = (user.email ?? '').trim();
@@ -24,10 +23,11 @@ class ProfilePage extends StatelessWidget {
 
   String _profileInitials(User? user) {
     final label = _profileLabel(user);
-    final parts = label
-        .split(RegExp(r'[\s,_-]+'))
-        .where((part) => part.isNotEmpty)
-        .toList();
+    final parts =
+        label
+            .split(RegExp(r'[\s,_-]+'))
+            .where((part) => part.isNotEmpty)
+            .toList();
 
     if (parts.isEmpty) return 'U';
     if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
@@ -51,6 +51,7 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final client = Supabase.instance.client;
     final user = client.auth.currentUser;
     final username = _profileLabel(user);
@@ -67,27 +68,27 @@ class ProfilePage extends StatelessWidget {
                 .order('created_at', ascending: false);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0b1220),
+      backgroundColor: cs.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0b1220),
+        backgroundColor: cs.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: cs.onSurface),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         actions: [
           IconButton(
             tooltip: 'Share profile',
-            icon: const Icon(Icons.ios_share_rounded, color: Colors.white),
+            icon: Icon(Icons.ios_share_rounded, color: cs.onSurface),
             onPressed: () => _shareProfile(context, username),
           ),
           IconButton(
             tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined, color: Colors.white),
+            icon: Icon(Icons.settings_outlined, color: cs.onSurface),
             onPressed:
-                () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                ),
+                () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
           ),
           const SizedBox(width: 6),
         ],
@@ -114,8 +115,8 @@ class ProfilePage extends StatelessWidget {
                         profileImageUrl == null
                             ? Text(
                               initials,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: cs.onSurface,
                                 fontSize: 28,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -126,8 +127,8 @@ class ProfilePage extends StatelessWidget {
                   Expanded(
                     child: Text(
                       username,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: cs.onSurface,
                         fontSize: 28,
                         fontWeight: FontWeight.w800,
                       ),
@@ -138,10 +139,7 @@ class ProfilePage extends StatelessWidget {
               const SizedBox(height: 28),
               Row(
                 children: [
-                  _StatBlock(
-                    label: 'Tanks',
-                    value: '${tanks.length}',
-                  ),
+                  _StatBlock(label: 'Tanks', value: '${tanks.length}'),
                 ],
               ),
               const SizedBox(height: 22),
@@ -165,10 +163,10 @@ class ProfilePage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 28),
-              const Text(
+              Text(
                 'Your tanks',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: cs.onSurface,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
@@ -184,13 +182,13 @@ class ProfilePage extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF122033),
+                    color: cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(color: cs.outline),
                   ),
-                  child: const Text(
+                  child: Text(
                     'No tanks yet.',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 16),
                   ),
                 )
               else
@@ -202,18 +200,17 @@ class ProfilePage extends StatelessWidget {
                     separatorBuilder: (_, __) => const SizedBox(width: 12),
                     itemBuilder: (context, index) {
                       final tank = tanks[index];
-                      final imageUrl = (tank['image_url'] ?? '')
-                          .toString()
-                          .trim();
+                      final imageUrl =
+                          (tank['image_url'] ?? '').toString().trim();
                       final hasImage =
                           imageUrl.isNotEmpty && imageUrl != 'NULL';
 
                       return Container(
                         width: 120,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF122033),
+                          color: cs.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: Colors.white10),
+                          border: Border.all(color: cs.outline),
                         ),
                         child: Stack(
                           children: [
@@ -226,9 +223,10 @@ class ProfilePage extends StatelessWidget {
                                           imageUrl,
                                           fit: BoxFit.cover,
                                           errorBuilder:
-                                              (_, __, ___) => _tankPlaceholder(),
+                                              (_, __, ___) =>
+                                                  _tankPlaceholder(context),
                                         )
-                                        : _tankPlaceholder(),
+                                        : _tankPlaceholder(context),
                               ),
                             ),
                             Positioned(
@@ -268,11 +266,17 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _tankPlaceholder() {
+  Widget _tankPlaceholder(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Container(
-      color: const Color(0xFF1f2937),
-      child: const Center(
-        child: Icon(Icons.water_outlined, color: Colors.white38, size: 34),
+      color: cs.surfaceContainerHigh,
+      child: Center(
+        child: Icon(
+          Icons.water_outlined,
+          color: cs.onSurfaceVariant.withValues(alpha: 0.58),
+          size: 34,
+        ),
       ),
     );
   }
@@ -286,18 +290,17 @@ class _StatBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 15),
-        ),
+        Text(label, style: TextStyle(color: cs.onSurfaceVariant, fontSize: 15)),
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: cs.onSurface,
             fontSize: 30,
             fontWeight: FontWeight.w800,
           ),

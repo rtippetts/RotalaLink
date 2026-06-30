@@ -34,8 +34,6 @@ class _TankDetailPageState extends State<TankDetailPage>
   static const _kTempBlue = Color(0xFF2F80ED);
   static const _kPhGreen = Color(0xFF27AE60);
   static const _kTdsPurple = Color(0xFF9B51E0);
-  static const _kCardBg = Color(0xFF1f2937);
-  static const _kPageBg = Color(0xFF111827);
   static const _kDanger = Color(0xFFE74C3C);
 
   // Defaults (canonical storage)
@@ -47,33 +45,36 @@ class _TankDetailPageState extends State<TankDetailPage>
   static const double _defaultIdealTdsMin = 0.0;
   static const double _defaultIdealTdsMax = 5000.0;
 
-Widget _logoAvatarFallback({required double size}) {
-  return Container(
-    width: size,
-    height: size,
-    decoration: const BoxDecoration(
-      color: Color(0xFF1a1a1a), // same as _tankPlaceholder
-      shape: BoxShape.circle,
-    ),
-    child: Center(
-      child: Opacity(
-        opacity: 0.5,
-        child: SizedBox(
-          height: size * 0.55, // ~40%–60% looks best in a circle
-          child: Image.asset(
-            'assets/brand/rotalafinalsquare2.png',
-            fit: BoxFit.contain,
+  Widget _logoAvatarFallback({required double size}) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Opacity(
+          opacity: 0.5,
+          child: SizedBox(
+            height: size * 0.55, // ~40%–60% looks best in a circle
+            child: Image.asset(
+              'assets/brand/rotalafinalsquare2.png',
+              fit: BoxFit.contain,
+            ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Color _seriesColor(ParamType t) => specFor(t).color;
 
-  late final TabController _tabController =
-      TabController(length: 4, vsync: this);
+  late final TabController _tabController = TabController(
+    length: 4,
+    vsync: this,
+  );
 
   bool _loading = true;
   List<MeasurePoint> _points = [];
@@ -160,7 +161,10 @@ Widget _logoAvatarFallback({required double size}) {
     List<Map<String, dynamic>> rows;
     try {
       await OfflineStore.instance.syncPending(supa);
-      var q = supa.from('sensor_readings').select(fields).eq('tank_id', widget.tank.id);
+      var q = supa
+          .from('sensor_readings')
+          .select(fields)
+          .eq('tank_id', widget.tank.id);
 
       if (fromUtc != null) q = q.gte('recorded_at', fromUtc);
 
@@ -174,29 +178,33 @@ Widget _logoAvatarFallback({required double size}) {
       );
     }
 
-    _points = rows
-        .map(
-          (r) => MeasurePoint(
-            id: r['id'] as String,
-            at: DateTime.parse(r['recorded_at']).toLocal(),
-            tempC: (() {
-              final tempF = (r['temperature'] as num?)?.toDouble();
-              return tempF == null ? null : _fToC(tempF);
-            })(),
-            ph: (r['ph'] as num?)?.toDouble(),
-            tds: (r['tds'] as num?)?.toDouble(),
-            values: valueMapFromReadingRow(r),
-            deviceUid: r['device_uid'] as String?,
-          ),
-        )
-        .toList();
+    _points =
+        rows
+            .map(
+              (r) => MeasurePoint(
+                id: r['id'] as String,
+                at: DateTime.parse(r['recorded_at']).toLocal(),
+                tempC:
+                    (() {
+                      final tempF = (r['temperature'] as num?)?.toDouble();
+                      return tempF == null ? null : _fToC(tempF);
+                    })(),
+                ph: (r['ph'] as num?)?.toDouble(),
+                tds: (r['tds'] as num?)?.toDouble(),
+                values: valueMapFromReadingRow(r),
+                deviceUid: r['device_uid'] as String?,
+              ),
+            )
+            .toList();
   }
 
   Future<int> _fetchMeasurementCountForTank(String tankId) async {
     final supa = Supabase.instance.client;
     try {
-      final rows =
-          await supa.from('sensor_readings').select('id').eq('tank_id', tankId);
+      final rows = await supa
+          .from('sensor_readings')
+          .select('id')
+          .eq('tank_id', tankId);
       return (rows as List).length;
     } catch (_) {
       return OfflineStore.instance.cachedReadingCount(tankId);
@@ -247,10 +255,11 @@ Widget _logoAvatarFallback({required double size}) {
     );
   }
 
-  List<ParamType> get _trackedParams => kTankParameterSpecs
-      .where((spec) => widget.tank.isTracking(spec.type))
-      .map((spec) => spec.type)
-      .toList();
+  List<ParamType> get _trackedParams =>
+      kTankParameterSpecs
+          .where((spec) => widget.tank.isTracking(spec.type))
+          .map((spec) => spec.type)
+          .toList();
 
   ParameterReading? get latestTemp => latestFor(ParamType.temperature);
   ParameterReading? get latestPh => latestFor(ParamType.ph);
@@ -261,12 +270,14 @@ Widget _logoAvatarFallback({required double size}) {
       final rows = await Supabase.instance.client
           .from('tank_notes')
           .select(
-              'id, title, body, created_at, updated_at, user_id, photos:tank_note_photos(id, storage_path, public_url, created_at)')
+            'id, title, body, created_at, updated_at, user_id, photos:tank_note_photos(id, storage_path, public_url, created_at)',
+          )
           .eq('tank_id', widget.tank.id)
           .order('created_at', ascending: false);
-      _notes = (rows as List)
-          .map((r) => NoteItem.fromRow(r as Map<String, dynamic>))
-          .toList();
+      _notes =
+          (rows as List)
+              .map((r) => NoteItem.fromRow(r as Map<String, dynamic>))
+              .toList();
     } catch (_) {}
   }
 
@@ -293,8 +304,9 @@ Widget _logoAvatarFallback({required double size}) {
         await Supabase.instance.client.storage
             .from(bucket)
             .upload(path, File(xf.path));
-        final url =
-            Supabase.instance.client.storage.from(bucket).getPublicUrl(path);
+        final url = Supabase.instance.client.storage
+            .from(bucket)
+            .getPublicUrl(path);
         photos.add(NotePhoto(id: pid, storagePath: path, publicUrl: url));
       }
       busy = false;
@@ -302,7 +314,9 @@ Widget _logoAvatarFallback({required double size}) {
     }
 
     Future<void> deleteStagedPhoto(NotePhoto p) async {
-      await Supabase.instance.client.storage.from(bucket).remove([p.storagePath]);
+      await Supabase.instance.client.storage.from(bucket).remove([
+        p.storagePath,
+      ]);
       photos.removeWhere((x) => x.storagePath == p.storagePath);
       if (mounted) setState(() {});
     }
@@ -315,183 +329,220 @@ Widget _logoAvatarFallback({required double size}) {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-          ),
-          child: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  Row(
-                    children: const [
-                      Icon(Icons.event_note, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text(
-                        'Note',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+      builder:
+          (ctx) => StatefulBuilder(
+            builder:
+                (ctx, setSheet) => Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: title,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: body,
-                    maxLines: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'Details',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final p in photos.take(6))
-                          Stack(
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  p.publicUrl,
-                                  width: 90,
-                                  height: 90,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              Positioned(
-                                right: 4,
-                                top: 4,
-                                child: InkWell(
-                                  onTap: () async {
-                                    await deleteStagedPhoto(p);
-                                    setSheet(() {});
-                                  },
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black45,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    padding: const EdgeInsets.all(2),
-                                    child: const Icon(Icons.close,
-                                        color: Colors.white, size: 16),
-                                  ),
+                  child: Form(
+                    key: formKey,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          Row(
+                            children: const [
+                              Icon(Icons.event_note, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Note',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],
                           ),
-                        OutlinedButton.icon(
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  await addPhotos();
-                                  setSheet(() {});
-                                },
-                          icon: const Icon(Icons.add_photo_alternate),
-                          label: const Text('Add photos'),
-                        ),
-                      ],
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: title,
+                            decoration: const InputDecoration(
+                              labelText: 'Title',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator:
+                                (v) =>
+                                    (v == null || v.trim().isEmpty)
+                                        ? 'Required'
+                                        : null,
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: body,
+                            maxLines: 6,
+                            decoration: const InputDecoration(
+                              labelText: 'Details',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final p in photos.take(6))
+                                  Stack(
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          p.publicUrl,
+                                          width: 90,
+                                          height: 90,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: 4,
+                                        top: 4,
+                                        child: InkWell(
+                                          onTap: () async {
+                                            await deleteStagedPhoto(p);
+                                            setSheet(() {});
+                                          },
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: Colors.black45,
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            padding: const EdgeInsets.all(2),
+                                            child: const Icon(
+                                              Icons.close,
+                                              color: Colors.white,
+                                              size: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                OutlinedButton.icon(
+                                  onPressed:
+                                      busy
+                                          ? null
+                                          : () async {
+                                            await addPhotos();
+                                            setSheet(() {});
+                                          },
+                                  icon: const Icon(Icons.add_photo_alternate),
+                                  label: const Text('Add photos'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  icon: const Icon(Icons.save),
+                                  onPressed:
+                                      busy
+                                          ? null
+                                          : () async {
+                                            if (!formKey.currentState!
+                                                .validate())
+                                              return;
+
+                                            final supa =
+                                                Supabase.instance.client;
+                                            final userId = uid;
+
+                                            if (existing == null) {
+                                              final noteId = const Uuid().v4();
+                                              await supa
+                                                  .from('tank_notes')
+                                                  .insert({
+                                                    'id': noteId,
+                                                    'tank_id': widget.tank.id,
+                                                    'user_id': userId,
+                                                    'title': title.text.trim(),
+                                                    'body': body.text.trim(),
+                                                  });
+
+                                              if (photos.isNotEmpty) {
+                                                await supa
+                                                    .from('tank_note_photos')
+                                                    .insert([
+                                                      for (final p in photos)
+                                                        {
+                                                          'note_id': noteId,
+                                                          'storage_path':
+                                                              p.storagePath,
+                                                          'public_url':
+                                                              p.publicUrl,
+                                                        },
+                                                    ]);
+                                              }
+                                            } else {
+                                              await supa
+                                                  .from('tank_notes')
+                                                  .update({
+                                                    'title': title.text.trim(),
+                                                    'body': body.text.trim(),
+                                                  })
+                                                  .eq('id', existing.id);
+
+                                              final existingPaths =
+                                                  existing.photos
+                                                      .map((e) => e.storagePath)
+                                                      .toSet();
+                                              final newOnes =
+                                                  photos
+                                                      .where(
+                                                        (p) =>
+                                                            !existingPaths
+                                                                .contains(
+                                                                  p.storagePath,
+                                                                ),
+                                                      )
+                                                      .toList();
+                                              if (newOnes.isNotEmpty) {
+                                                await supa
+                                                    .from('tank_note_photos')
+                                                    .insert([
+                                                      for (final p in newOnes)
+                                                        {
+                                                          'note_id':
+                                                              existing.id,
+                                                          'storage_path':
+                                                              p.storagePath,
+                                                          'public_url':
+                                                              p.publicUrl,
+                                                        },
+                                                    ]);
+                                              }
+                                            }
+
+                                            if (!mounted) return;
+                                            Navigator.pop(ctx, true);
+                                          },
+                                  label: const Text('Save'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton.icon(
-                          icon: const Icon(Icons.save),
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  if (!formKey.currentState!.validate()) return;
-
-                                  final supa = Supabase.instance.client;
-                                  final userId = uid;
-
-                                  if (existing == null) {
-                                    final noteId = const Uuid().v4();
-                                    await supa.from('tank_notes').insert({
-                                      'id': noteId,
-                                      'tank_id': widget.tank.id,
-                                      'user_id': userId,
-                                      'title': title.text.trim(),
-                                      'body': body.text.trim(),
-                                    });
-
-                                    if (photos.isNotEmpty) {
-                                      await supa.from('tank_note_photos').insert([
-                                        for (final p in photos)
-                                          {
-                                            'note_id': noteId,
-                                            'storage_path': p.storagePath,
-                                            'public_url': p.publicUrl,
-                                          }
-                                      ]);
-                                    }
-                                  } else {
-                                    await supa.from('tank_notes').update({
-                                      'title': title.text.trim(),
-                                      'body': body.text.trim(),
-                                    }).eq('id', existing.id);
-
-                                    final existingPaths =
-                                        existing.photos.map((e) => e.storagePath).toSet();
-                                    final newOnes = photos
-                                        .where((p) => !existingPaths.contains(p.storagePath))
-                                        .toList();
-                                    if (newOnes.isNotEmpty) {
-                                      await supa.from('tank_note_photos').insert([
-                                        for (final p in newOnes)
-                                          {
-                                            'note_id': existing.id,
-                                            'storage_path': p.storagePath,
-                                            'public_url': p.publicUrl,
-                                          }
-                                      ]);
-                                    }
-                                  }
-
-                                  if (!mounted) return;
-                                  Navigator.pop(ctx, true);
-                                },
-                          label: const Text('Save'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+                ),
           ),
-        ),
-      ),
     );
 
     if (saved == true) {
@@ -503,28 +554,29 @@ Widget _logoAvatarFallback({required double size}) {
   Future<void> _deleteNote(NoteItem n) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete note?'),
-        content: const Text('This will remove the note and its photos.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder:
+          (_) => AlertDialog(
+            title: const Text('Delete note?'),
+            content: const Text('This will remove the note and its photos.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
     if (ok != true) return;
 
     final supa = Supabase.instance.client;
     if (n.photos.isNotEmpty) {
-      await supa.storage
-          .from('tank-notes')
-          .remove([for (final p in n.photos) p.storagePath]);
+      await supa.storage.from('tank-notes').remove([
+        for (final p in n.photos) p.storagePath,
+      ]);
       await supa.from('tank_note_photos').delete().eq('note_id', n.id);
     }
     await supa.from('tank_notes').delete().eq('id', n.id);
@@ -540,9 +592,10 @@ Widget _logoAvatarFallback({required double size}) {
           .select('id, title, done, due_at, reading_id, created_at, updated_at')
           .eq('tank_id', widget.tank.id)
           .order('created_at', ascending: false);
-      _tasks = (rows as List)
-          .map((r) => TaskItem.fromRow(r as Map<String, dynamic>))
-          .toList();
+      _tasks =
+          (rows as List)
+              .map((r) => TaskItem.fromRow(r as Map<String, dynamic>))
+              .toList();
     } catch (_) {}
   }
 
@@ -551,67 +604,76 @@ Widget _logoAvatarFallback({required double size}) {
     String? readingId,
     String? suggestedTitle,
   }) async {
-    final title =
-        TextEditingController(text: existing?.title ?? suggestedTitle ?? '');
+    final title = TextEditingController(
+      text: existing?.title ?? suggestedTitle ?? '',
+    );
     DateTime? due = existing?.due;
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(builder: (ctx, setSheet) {
-        return AlertDialog(
-          title: Text(existing == null ? 'Add Task' : 'Edit Task'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: title,
-                decoration: const InputDecoration(labelText: 'Title'),
-              ),
-              const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(due == null
-                    ? 'No due date'
-                    : 'Due: ${_timeExact(due!)}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.edit_calendar),
-                  onPressed: () async {
-                    final now = DateTime.now();
-                    final d = await showDatePicker(
-                      context: ctx,
-                      initialDate: due ?? now,
-                      firstDate: now.subtract(const Duration(days: 3650)),
-                      lastDate: now.add(const Duration(days: 3650)),
-                    );
-                    if (d == null) return;
-                    final t = await showTimePicker(
-                      context: ctx,
-                      initialTime: TimeOfDay.fromDateTime(due ?? now),
-                    );
-                    setSheet(() => due = DateTime(
-                          d.year,
-                          d.month,
-                          d.day,
-                          (t?.hour ?? 0),
-                          (t?.minute ?? 0),
-                        ));
-                  },
+      builder:
+          (_) => StatefulBuilder(
+            builder: (ctx, setSheet) {
+              return AlertDialog(
+                title: Text(existing == null ? 'Add Task' : 'Edit Task'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: title,
+                      decoration: const InputDecoration(labelText: 'Title'),
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        due == null
+                            ? 'No due date'
+                            : 'Due: ${_timeExact(due!)}',
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.edit_calendar),
+                        onPressed: () async {
+                          final now = DateTime.now();
+                          final d = await showDatePicker(
+                            context: ctx,
+                            initialDate: due ?? now,
+                            firstDate: now.subtract(const Duration(days: 3650)),
+                            lastDate: now.add(const Duration(days: 3650)),
+                          );
+                          if (d == null) return;
+                          final t = await showTimePicker(
+                            context: ctx,
+                            initialTime: TimeOfDay.fromDateTime(due ?? now),
+                          );
+                          setSheet(
+                            () =>
+                                due = DateTime(
+                                  d.year,
+                                  d.month,
+                                  d.day,
+                                  (t?.hour ?? 0),
+                                  (t?.minute ?? 0),
+                                ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Save'),
+                  ),
+                ],
+              );
+            },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      }),
     );
     if (saved != true) return;
 
@@ -627,10 +689,13 @@ Widget _logoAvatarFallback({required double size}) {
         'reading_id': readingId,
       });
     } else {
-      await supa.from('tank_tasks').update({
-        'title': title.text.trim(),
-        'due_at': due?.toUtc().toIso8601String(),
-      }).eq('id', existing.id);
+      await supa
+          .from('tank_tasks')
+          .update({
+            'title': title.text.trim(),
+            'due_at': due?.toUtc().toIso8601String(),
+          })
+          .eq('id', existing.id);
     }
 
     await _loadTasks();
@@ -640,20 +705,21 @@ Widget _logoAvatarFallback({required double size}) {
   Future<void> _deleteTask(TaskItem t) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete task?'),
-        content: const Text('This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder:
+          (_) => AlertDialog(
+            title: const Text('Delete task?'),
+            content: const Text('This cannot be undone.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
     if (ok != true) return;
 
@@ -665,32 +731,37 @@ Widget _logoAvatarFallback({required double size}) {
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final volumeLabel = _useGallons
-        ? '${widget.tank.volumeGallons.toStringAsFixed(0)} gal'
-        : '${widget.tank.volumeLiters.toStringAsFixed(0)} L';
+    final cs = Theme.of(context).colorScheme;
+    final cardColor = cs.surfaceContainerHighest;
+    final volumeLabel =
+        _useGallons
+            ? '${widget.tank.volumeGallons.toStringAsFixed(0)} gal'
+            : '${widget.tank.volumeLiters.toStringAsFixed(0)} L';
 
     final subtitle =
         '$volumeLabel • ${_labelForWaterType(widget.tank.waterType ?? 'freshwater')}';
 
     final hasAppBarImg =
-        (widget.tank.imageUrl != null && widget.tank.imageUrl!.trim().isNotEmpty);
+        (widget.tank.imageUrl != null &&
+            widget.tank.imageUrl!.trim().isNotEmpty);
 
     return Scaffold(
-      backgroundColor: _kPageBg,
+      backgroundColor: cs.surface,
       appBar: AppBar(
-        backgroundColor: _kPageBg,
+        backgroundColor: cs.surface,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: cs.onSurface),
         titleSpacing: 0,
         title: Row(
           children: [
             const SizedBox(width: 8),
             CircleAvatar(
-  radius: 20,
-  backgroundColor: Colors.grey.shade700,
-  backgroundImage: hasAppBarImg ? NetworkImage(widget.tank.imageUrl!) : null,
-  child: hasAppBarImg ? null : _logoAvatarFallback(size: 40),
-),
+              radius: 20,
+              backgroundColor: cs.surfaceContainerHighest,
+              backgroundImage:
+                  hasAppBarImg ? NetworkImage(widget.tank.imageUrl!) : null,
+              child: hasAppBarImg ? null : _logoAvatarFallback(size: 40),
+            ),
 
             const SizedBox(width: 12),
             Expanded(
@@ -700,13 +771,13 @@ Widget _logoAvatarFallback({required double size}) {
                   Text(
                     widget.tank.name,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    style: TextStyle(color: cs.onSurface, fontSize: 16),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '$subtitle  •  ${_lastMeasuredLabel()}',
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
                   ),
                 ],
               ),
@@ -716,7 +787,7 @@ Widget _logoAvatarFallback({required double size}) {
         actions: [
           IconButton(
             tooltip: 'Edit tank',
-            icon: const Icon(Icons.edit, color: Colors.white),
+            icon: Icon(Icons.edit, color: cs.onSurface),
             onPressed: _openEditTank,
           ),
           const SizedBox(width: 6),
@@ -730,9 +801,9 @@ Widget _logoAvatarFallback({required double size}) {
         children: [
           TabBar(
             controller: _tabController,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.tealAccent,
+            labelColor: cs.onSurface,
+            unselectedLabelColor: cs.onSurfaceVariant,
+            indicatorColor: RotalaColors.teal,
             isScrollable: true,
             tabs: const [
               Tab(text: 'Overview'),
@@ -743,14 +814,16 @@ Widget _logoAvatarFallback({required double size}) {
           ),
           Expanded(
             child: RefreshIndicator(
+              color: RotalaColors.teal,
+              backgroundColor: cs.surface,
               onRefresh: _refreshAll,
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildOverview(_kCardBg),
-                  _buildReadings(_kCardBg),
-                  _buildNotes(_kCardBg),
-                  _buildTasks(_kCardBg),
+                  _buildOverview(cardColor),
+                  _buildReadings(cardColor),
+                  _buildNotes(cardColor),
+                  _buildTasks(cardColor),
                 ],
               ),
             ),
@@ -846,21 +919,24 @@ Widget _logoAvatarFallback({required double size}) {
         final tds = (r['tds'] as num?)?.toDouble();
         final deviceUid = r['device_uid'] as String?;
 
-        buffer.writeln([
-          recordedLocal.toIso8601String(),
-          recordedUtc.toIso8601String(),
-          fmtNum(tempC, decimals: 2),
-          fmtNum(tempF, decimals: 2),
-          fmtNum(ph, decimals: 3),
-          fmtNum(tds, decimals: 0),
-          deviceUid ?? '',
-        ].join(','));
+        buffer.writeln(
+          [
+            recordedLocal.toIso8601String(),
+            recordedUtc.toIso8601String(),
+            fmtNum(tempC, decimals: 2),
+            fmtNum(tempF, decimals: 2),
+            fmtNum(ph, decimals: 3),
+            fmtNum(tds, decimals: 0),
+            deviceUid ?? '',
+          ].join(','),
+        );
       }
 
       final dir = await getTemporaryDirectory();
-      final safeTankName = widget.tank.name
-          .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
-          .toLowerCase();
+      final safeTankName =
+          widget.tank.name
+              .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
+              .toLowerCase();
       final file = File('${dir.path}/tank_${safeTankName}_readings.csv');
 
       await file.writeAsString(buffer.toString());
@@ -872,24 +948,26 @@ Widget _logoAvatarFallback({required double size}) {
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported ${list.length} readings for ${widget.tank.name}')),
+        SnackBar(
+          content: Text(
+            'Exported ${list.length} readings for ${widget.tank.name}',
+          ),
+        ),
       );
     } catch (e, st) {
       debugPrint('CSV export failed: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('CSV export failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('CSV export failed: $e')));
     }
   }
 
   // ---------- Overview ----------
   Widget _buildOverview(Color card) {
+    final cs = Theme.of(context).colorScheme;
     final tiles =
-        _trackedParams
-            .map(latestFor)
-            .whereType<ParameterReading>()
-            .toList();
+        _trackedParams.map(latestFor).whereType<ParameterReading>().toList();
 
     bool _oor(ParameterReading r) =>
         r.value < r.goodRange.start || r.value > r.goodRange.end;
@@ -917,54 +995,66 @@ Widget _logoAvatarFallback({required double size}) {
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: tiles.map((reading) {
-                  final selected = reading.type == _series;
-                  final showBadge = warningMap[reading.type] ?? false;
-                  final color = _seriesColor(reading.type);
-                  return FilterChip(
-                    selected: selected,
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (showBadge) ...[
-                          const Icon(
-                            Icons.error_outline,
-                            size: 14,
-                            color: Color(0xFFE74C3C),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Text(_labelForParam(reading.type)),
-                      ],
-                    ),
-                    selectedColor: RotalaColors.teal.withValues(alpha: 0.25),
-                    checkmarkColor: Colors.white,
-                    labelStyle: const TextStyle(color: Colors.white),
-                    backgroundColor: const Color(0xFF0b1220),
-                    side: BorderSide(
-                      color: selected
-                          ? RotalaColors.teal.withValues(alpha: 0.7)
-                          : color.withValues(alpha: 0.45),
-                    ),
-                    onSelected: (_) => setState(() => _series = reading.type),
-                  );
-                }).toList(),
+                children:
+                    tiles.map((reading) {
+                      final selected = reading.type == _series;
+                      final showBadge = warningMap[reading.type] ?? false;
+                      final color = _seriesColor(reading.type);
+                      return FilterChip(
+                        selected: selected,
+                        label: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (showBadge) ...[
+                              const Icon(
+                                Icons.error_outline,
+                                size: 14,
+                                color: Color(0xFFE74C3C),
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Text(_labelForParam(reading.type)),
+                          ],
+                        ),
+                        selectedColor: RotalaColors.teal.withValues(
+                          alpha: 0.25,
+                        ),
+                        checkmarkColor: cs.onSurface,
+                        labelStyle: TextStyle(
+                          color: selected ? cs.onSurface : color,
+                        ),
+                        backgroundColor: cs.surface,
+                        side: BorderSide(
+                          color:
+                              selected
+                                  ? RotalaColors.teal.withValues(alpha: 0.7)
+                                  : color.withValues(alpha: 0.45),
+                        ),
+                        onSelected:
+                            (_) => setState(() => _series = reading.type),
+                      );
+                    }).toList(),
               ),
             )
           else
             Container(
               padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
-              child: const Text('No recent measurements', style: TextStyle(color: Colors.white70)),
+              decoration: BoxDecoration(
+                color: card,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'No recent measurements',
+                style: TextStyle(color: cs.onSurfaceVariant),
+              ),
             ),
           const SizedBox(height: 12),
 
           DropdownButtonFormField<Period>(
             value: _period,
-            dropdownColor: const Color(0xFF0b1220),
-            decoration: const InputDecoration(
+            dropdownColor: cs.surface,
+            decoration: InputDecoration(
               labelText: 'Time range',
-              labelStyle: TextStyle(color: Colors.white70),
               border: OutlineInputBorder(),
             ),
             items: const [
@@ -981,99 +1071,125 @@ Widget _logoAvatarFallback({required double size}) {
           ),
           const SizedBox(height: 12),
 
-          Builder(builder: (_) {
-            final r = latestFor(_series);
-            if (r == null) return const SizedBox.shrink();
+          Builder(
+            builder: (_) {
+              final r = latestFor(_series);
+              if (r == null) return const SizedBox.shrink();
 
-            final isOOR = (r.value < r.goodRange.start || r.value > r.goodRange.end);
-            final k = '${r.type.name}@${r.timestamp.toIso8601String()}';
-            if (!isOOR || _dismissedWarningKeys.contains(k)) return const SizedBox.shrink();
+              final isOOR =
+                  (r.value < r.goodRange.start || r.value > r.goodRange.end);
+              final k = '${r.type.name}@${r.timestamp.toIso8601String()}';
+              if (!isOOR || _dismissedWarningKeys.contains(k))
+                return const SizedBox.shrink();
 
-            final text =
-                '${_labelForParam(r.type)} out of range: ${_formatValue(r)} ${r.unit}. Target ${_formatRange(r.goodRange)}';
+              final text =
+                  '${_labelForParam(r.type)} out of range: ${_formatValue(r)} ${r.unit}. Target ${_formatRange(r.goodRange)}';
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _kDanger.withOpacity(0.12),
-                border: Border.all(color: _kDanger),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: const [
-                      Icon(Icons.error_outline, color: _kDanger),
-                      SizedBox(width: 8),
-                      Text('Warning',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(text, style: const TextStyle(color: Colors.white70)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white24),
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _kDanger.withOpacity(0.12),
+                  border: Border.all(color: _kDanger),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: _kDanger),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Warning',
+                          style: TextStyle(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                        onPressed: () async {
-                          final ok = await showDialog<bool>(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('Dismiss warning?'),
-                              content: const Text('Are you sure you want to dismiss this warning?'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text('Cancel'),
-                                ),
-                                FilledButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Dismiss'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (ok == true) setState(() => _dismissedWarningKeys.add(k));
-                        },
-                        child: const Text('Dismiss'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: () {
-                          final title =
-                              'Fix ${_labelForParam(r.type)} (${_formatValue(r)} ${r.unit}) • Target ${_formatRange(r.goodRange)}';
-                          final readingId = _mostRecentReadingIdFor(_series);
-                          _createOrEditTask(suggestedTitle: title, readingId: readingId);
-                          _tabController.index = 3;
-                        },
-                        icon: const Icon(Icons.add_task),
-                        label: const Text('Set Task'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(text, style: TextStyle(color: cs.onSurfaceVariant)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: cs.onSurface,
+                            side: BorderSide(color: cs.outline),
+                          ),
+                          onPressed: () async {
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder:
+                                  (_) => AlertDialog(
+                                    title: const Text('Dismiss warning?'),
+                                    content: const Text(
+                                      'Are you sure you want to dismiss this warning?',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed:
+                                            () => Navigator.pop(context, false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      FilledButton(
+                                        onPressed:
+                                            () => Navigator.pop(context, true),
+                                        child: const Text('Dismiss'),
+                                      ),
+                                    ],
+                                  ),
+                            );
+                            if (ok == true)
+                              setState(() => _dismissedWarningKeys.add(k));
+                          },
+                          child: const Text('Dismiss'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: () {
+                            final title =
+                                'Fix ${_labelForParam(r.type)} (${_formatValue(r)} ${r.unit}) • Target ${_formatRange(r.goodRange)}';
+                            final readingId = _mostRecentReadingIdFor(_series);
+                            _createOrEditTask(
+                              suggestedTitle: title,
+                              readingId: readingId,
+                            );
+                            _tabController.index = 3;
+                          },
+                          icon: const Icon(Icons.add_task),
+                          label: const Text('Set Task'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
 
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: card,
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: SizedBox(
               height: 260,
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: Colors.teal))
-                  : _spotsFor(_series).isEmpty
+              child:
+                  _loading
                       ? const Center(
-                          child: Text('No data for selected parameter',
-                              style: TextStyle(color: Colors.white54)),
-                        )
+                        child: CircularProgressIndicator(color: Colors.teal),
+                      )
+                      : _spotsFor(_series).isEmpty
+                      ? Center(
+                        child: Text(
+                          'No data for selected parameter',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
+                      )
                       : LineChart(_buildSingleSeriesChartData(_series)),
             ),
           ),
@@ -1090,13 +1206,15 @@ Widget _logoAvatarFallback({required double size}) {
 
   // ---------- Readings ----------
   Widget _buildReadings(Color card) {
+    final cs = Theme.of(context).colorScheme;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.white,
-            side: const BorderSide(color: Colors.white24),
+            foregroundColor: cs.onSurface,
+            side: BorderSide(color: cs.outline),
           ),
           onPressed: _openManualReadingForm,
           icon: const Icon(Icons.add_chart),
@@ -1106,35 +1224,40 @@ Widget _logoAvatarFallback({required double size}) {
         ..._points.reversed.take(200).map((p) {
           final isManual = p.deviceUid == null;
           final iconData = isManual ? Icons.edit_note : Icons.sensors;
-          final iconColor = isManual ? Colors.tealAccent : Colors.white70;
-          final readings = _trackedParams
-              .map((type) => _formatPointReading(p, type))
-              .whereType<String>()
-              .toList();
+          final iconColor = isManual ? RotalaColors.teal : cs.onSurfaceVariant;
+          final readings =
+              _trackedParams
+                  .map((type) => _formatPointReading(p, type))
+                  .whereType<String>()
+                  .toList();
 
           return Container(
             margin: const EdgeInsets.only(bottom: 6),
             decoration: BoxDecoration(
-              color: Colors.white10,
+              color: card,
               borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cs.outline),
             ),
             child: ListTile(
               dense: true,
-              textColor: Colors.white,
-              iconColor: Colors.white70,
+              textColor: cs.onSurface,
+              iconColor: cs.onSurfaceVariant,
               leading: Icon(iconData, color: iconColor),
               title: Text(_timeExact(p.at)),
               subtitle: Text(
                 readings.isEmpty
                     ? 'No tracked values recorded'
                     : readings.join('   '),
-                style: const TextStyle(color: Colors.white70),
+                style: TextStyle(color: cs.onSurfaceVariant),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    tooltip: isManual ? 'Edit manual reading' : 'Edit device reading',
+                    tooltip:
+                        isManual
+                            ? 'Edit manual reading'
+                            : 'Edit device reading',
                     icon: const Icon(Icons.edit),
                     onPressed: () => _editManualReading(p),
                   ),
@@ -1153,18 +1276,18 @@ Widget _logoAvatarFallback({required double size}) {
   }
 
   Future<void> _editManualReading(MeasurePoint p) async {
-    final specs = _trackedParams.isEmpty
-        ? kTankParameterSpecs.where((spec) => spec.defaultTracked).toList()
-        : _trackedParams.map(specFor).toList();
+    final specs =
+        _trackedParams.isEmpty
+            ? kTankParameterSpecs.where((spec) => spec.defaultTracked).toList()
+            : _trackedParams.map(specFor).toList();
     final ctrls = <ParamType, TextEditingController>{
       for (final spec in specs)
         spec.type: TextEditingController(
           text: () {
             final value = p.valueFor(spec.type);
             if (value == null) return '';
-            final displayValue = spec.isTemperature && _useFahrenheit
-                ? _cToF(value)
-                : value;
+            final displayValue =
+                spec.isTemperature && _useFahrenheit ? _cToF(value) : value;
             return displayValue.toStringAsFixed(spec.decimals);
           }(),
         ),
@@ -1173,76 +1296,82 @@ Widget _logoAvatarFallback({required double size}) {
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit reading'),
-        content: Form(
-          key: formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final spec in specs) ...[
-                  _numField(
-                    _fieldLabelForSpec(spec),
-                    ctrls[spec.type]!,
-                    decimals: spec.decimals,
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Recorded at: ${_timeExact(p.at)} (locked)',
-                    style: const TextStyle(fontSize: 12),
-                  ),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Edit reading'),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final spec in specs) ...[
+                      _numField(
+                        _fieldLabelForSpec(spec),
+                        ctrls[spec.type]!,
+                        decimals: spec.decimals,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Recorded at: ${_timeExact(p.at)} (locked)',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final anyEntered = ctrls.values.any((c) => c.text.trim().isNotEmpty);
-              if (!anyEntered) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Enter at least one value.')),
-                );
-                return;
-              }
-              if (!formKey.currentState!.validate()) return;
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final anyEntered = ctrls.values.any(
+                    (c) => c.text.trim().isNotEmpty,
+                  );
+                  if (!anyEntered) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Enter at least one value.'),
+                      ),
+                    );
+                    return;
+                  }
+                  if (!formKey.currentState!.validate()) return;
 
-              final payload = <String, dynamic>{};
-              for (final spec in specs) {
-                final raw = ctrls[spec.type]!.text.trim();
-                if (raw.isEmpty) {
-                  payload[spec.readingField] = null;
-                  continue;
-                }
-                final parsed = double.tryParse(raw);
-                payload[spec.readingField] = parsed == null
-                    ? null
-                    : (spec.isTemperature
-                        ? (_useFahrenheit ? parsed : _cToF(parsed))
-                        : parsed);
-              }
+                  final payload = <String, dynamic>{};
+                  for (final spec in specs) {
+                    final raw = ctrls[spec.type]!.text.trim();
+                    if (raw.isEmpty) {
+                      payload[spec.readingField] = null;
+                      continue;
+                    }
+                    final parsed = double.tryParse(raw);
+                    payload[spec.readingField] =
+                        parsed == null
+                            ? null
+                            : (spec.isTemperature
+                                ? (_useFahrenheit ? parsed : _cToF(parsed))
+                                : parsed);
+                  }
 
-              await Supabase.instance.client
-                  .from('sensor_readings')
-                  .update(payload)
-                  .eq('id', p.id);
+                  await Supabase.instance.client
+                      .from('sensor_readings')
+                      .update(payload)
+                      .eq('id', p.id);
 
-              if (!mounted) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Save'),
+                  if (!mounted) return;
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text('Save'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
 
     if (saved == true) {
@@ -1254,14 +1383,21 @@ Widget _logoAvatarFallback({required double size}) {
   Future<void> _deleteReading(MeasurePoint p) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete reading?'),
-        content: const Text('This will permanently remove this reading.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete reading?'),
+            content: const Text('This will permanently remove this reading.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
     );
     if (ok != true) return;
 
@@ -1273,8 +1409,9 @@ Widget _logoAvatarFallback({required double size}) {
     } catch (e, st) {
       debugPrint('Error deleting reading: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
     }
   }
 
@@ -1296,7 +1433,10 @@ Widget _logoAvatarFallback({required double size}) {
         ..._notes.map(
           (n) => Container(
             margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(
+              color: card,
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: ListTile(
               leading: const Icon(Icons.event_note, color: Colors.white70),
               title: Text(n.title, style: const TextStyle(color: Colors.white)),
@@ -1323,8 +1463,10 @@ Widget _logoAvatarFallback({required double size}) {
                             ),
                           ),
                         if (n.photos.length > 3)
-                          Text('+${n.photos.length - 3} more',
-                              style: const TextStyle(color: Colors.white54)),
+                          Text(
+                            '+${n.photos.length - 3} more',
+                            style: const TextStyle(color: Colors.white54),
+                          ),
                       ],
                     ),
                   const SizedBox(height: 6),
@@ -1340,10 +1482,11 @@ Widget _logoAvatarFallback({required double size}) {
                   if (v == 'edit') _createOrEditNote(existing: n);
                   if (v == 'delete') _deleteNote(n);
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
-                ],
+                itemBuilder:
+                    (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
               ),
             ),
           ),
@@ -1373,13 +1516,17 @@ Widget _logoAvatarFallback({required double size}) {
 
         final t = _tasks[i - 1];
         return Container(
-          decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(12)),
+          decoration: BoxDecoration(
+            color: card,
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: CheckboxListTile(
             value: t.done,
             onChanged: (v) async {
               await Supabase.instance.client
                   .from('tank_tasks')
-                  .update({'done': v ?? false}).eq('id', t.id);
+                  .update({'done': v ?? false})
+                  .eq('id', t.id);
               await _loadTasks();
               if (mounted) setState(() {});
             },
@@ -1388,12 +1535,16 @@ Widget _logoAvatarFallback({required double size}) {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (t.due != null)
-                  Text('Due ${_timeExact(t.due!)}',
-                      style: const TextStyle(color: Colors.white70)),
+                  Text(
+                    'Due ${_timeExact(t.due!)}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
               ],
             ),
             controlAffinity: ListTileControlAffinity.leading,
-            checkboxShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            checkboxShape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
             activeColor: Colors.teal,
             secondary: PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.white70),
@@ -1401,10 +1552,11 @@ Widget _logoAvatarFallback({required double size}) {
                 if (v == 'edit') _createOrEditTask(existing: t);
                 if (v == 'delete') _deleteTask(t);
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'edit', child: Text('Edit')),
-                PopupMenuItem(value: 'delete', child: Text('Delete')),
-              ],
+              itemBuilder:
+                  (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
             ),
           ),
         );
@@ -1415,7 +1567,8 @@ Widget _logoAvatarFallback({required double size}) {
   // ---------- Chart helpers ----------
   DateTime get _periodStart {
     final custom = _periodFromDate(_period);
-    final start = custom ?? (_points.isNotEmpty ? _points.first.at : DateTime.now());
+    final start =
+        custom ?? (_points.isNotEmpty ? _points.first.at : DateTime.now());
     return DateTime(start.year, start.month, start.day);
   }
 
@@ -1441,9 +1594,10 @@ Widget _logoAvatarFallback({required double size}) {
     for (final point in _points) {
       final rawValue = point.valueFor(type);
       if (rawValue == null) continue;
-      final displayValue = specFor(type).isTemperature && _useFahrenheit
-          ? _cToF(rawValue)
-          : rawValue;
+      final displayValue =
+          specFor(type).isTemperature && _useFahrenheit
+              ? _cToF(rawValue)
+              : rawValue;
       spots.add(FlSpot(_xDay(point.at), displayValue));
     }
     return spots;
@@ -1508,8 +1662,18 @@ Widget _logoAvatarFallback({required double size}) {
       ],
       extraLinesData: ExtraLinesData(
         horizontalLines: [
-          HorizontalLine(y: band.start, color: _kDanger, strokeWidth: 1.5, dashArray: [4, 3]),
-          HorizontalLine(y: band.end, color: _kDanger, strokeWidth: 1.5, dashArray: [4, 3]),
+          HorizontalLine(
+            y: band.start,
+            color: _kDanger,
+            strokeWidth: 1.5,
+            dashArray: [4, 3],
+          ),
+          HorizontalLine(
+            y: band.end,
+            color: _kDanger,
+            strokeWidth: 1.5,
+            dashArray: [4, 3],
+          ),
         ],
       ),
       rangeAnnotations: RangeAnnotations(
@@ -1531,24 +1695,29 @@ Widget _logoAvatarFallback({required double size}) {
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            interval: (maxX - minX) <= 7 ? 1 : ((maxX - minX) / 6).ceilToDouble(),
-            getTitlesWidget: (x, _) => Text(
-              _mmddForTick(x),
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
-            ),
+            interval:
+                (maxX - minX) <= 7 ? 1 : ((maxX - minX) / 6).ceilToDouble(),
+            getTitlesWidget:
+                (x, _) => Text(
+                  _mmddForTick(x),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
           ),
         ),
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 38,
-            getTitlesWidget: (y, _) => Text(
-              y.toStringAsFixed(spec.decimals),
-              style: const TextStyle(color: Colors.white54, fontSize: 11),
-            ),
+            getTitlesWidget:
+                (y, _) => Text(
+                  y.toStringAsFixed(spec.decimals),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
           ),
         ),
-        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: const AxisTitles(
+          sideTitles: SideTitles(showTitles: false),
+        ),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       borderData: FlBorderData(show: false),
@@ -1556,9 +1725,10 @@ Widget _logoAvatarFallback({required double size}) {
   }
 
   Future<void> _openManualReadingForm() async {
-    final specs = _trackedParams.isEmpty
-        ? kTankParameterSpecs.where((spec) => spec.defaultTracked).toList()
-        : _trackedParams.map(specFor).toList();
+    final specs =
+        _trackedParams.isEmpty
+            ? kTankParameterSpecs.where((spec) => spec.defaultTracked).toList()
+            : _trackedParams.map(specFor).toList();
     final ctrls = <ParamType, TextEditingController>{
       for (final spec in specs) spec.type: TextEditingController(),
     };
@@ -1574,182 +1744,241 @@ Widget _logoAvatarFallback({required double size}) {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Future<void> pickDateTime() async {
-            final d = await showDatePicker(
-              context: ctx,
-              initialDate: localWhen,
-              firstDate: DateTime(2000),
-              lastDate: DateTime.now().add(const Duration(days: 365)),
-            );
-            if (d == null) return;
-            final t = await showTimePicker(
-              context: ctx,
-              initialTime: TimeOfDay.fromDateTime(localWhen),
-            );
-            if (t == null) return;
-            setSheet(() => localWhen = DateTime(d.year, d.month, d.day, t.hour, t.minute));
-          }
-
-          String whenLabel() {
-            final y = localWhen.year.toString().padLeft(4, '0');
-            final m = localWhen.month.toString().padLeft(2, '0');
-            final d = localWhen.day.toString().padLeft(2, '0');
-            final hh = localWhen.hour.toString().padLeft(2, '0');
-            final mm = localWhen.minute.toString().padLeft(2, '0');
-            return '$y-$m-$d - $hh:$mm (local)';
-          }
-
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: Form(
-              key: formKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.science, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text(
-                          'Add manual reading',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    ListTile(
-                      tileColor: Colors.white12,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      onTap: pickDateTime,
-                      leading: const Icon(Icons.schedule, color: Colors.white),
-                      title: Text(whenLabel(), style: const TextStyle(color: Colors.white)),
-                      trailing: const Icon(Icons.edit_calendar, color: Colors.white70),
-                    ),
-                    const SizedBox(height: 12),
-                    for (final spec in specs) ...[
-                      _numField(
-                        _fieldLabelForSpec(spec),
-                        ctrls[spec.type]!,
-                        decimals: spec.decimals,
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setSheet) {
+              Future<void> pickDateTime() async {
+                final d = await showDatePicker(
+                  context: ctx,
+                  initialDate: localWhen,
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                );
+                if (d == null) return;
+                final t = await showTimePicker(
+                  context: ctx,
+                  initialTime: TimeOfDay.fromDateTime(localWhen),
+                );
+                if (t == null) return;
+                setSheet(
+                  () =>
+                      localWhen = DateTime(
+                        d.year,
+                        d.month,
+                        d.day,
+                        t.hour,
+                        t.minute,
                       ),
-                      const SizedBox(height: 10),
-                    ],
-                    Row(
+                );
+              }
+
+              String whenLabel() {
+                final y = localWhen.year.toString().padLeft(4, '0');
+                final m = localWhen.month.toString().padLeft(2, '0');
+                final d = localWhen.day.toString().padLeft(2, '0');
+                final hh = localWhen.hour.toString().padLeft(2, '0');
+                final mm = localWhen.minute.toString().padLeft(2, '0');
+                return '$y-$m-$d - $hh:$mm (local)';
+              }
+
+              return Padding(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 16,
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+                ),
+                child: Form(
+                  key: formKey,
+                  child: SingleChildScrollView(
+                    child: Column(
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: saving ? null : () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
+                        Row(
+                          children: const [
+                            Icon(Icons.science, color: Colors.white),
+                            SizedBox(width: 8),
+                            Text(
+                              'Add manual reading',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ListTile(
+                          tileColor: Colors.white12,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          onTap: pickDateTime,
+                          leading: const Icon(
+                            Icons.schedule,
+                            color: Colors.white,
+                          ),
+                          title: Text(
+                            whenLabel(),
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          trailing: const Icon(
+                            Icons.edit_calendar,
+                            color: Colors.white70,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.icon(
-                            icon: saving
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.save),
-                            onPressed: saving
-                                ? null
-                                : () async {
-                                    final anyEntered = ctrls.values.any((c) => c.text.trim().isNotEmpty);
-                                    if (!anyEntered) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Enter at least one parameter.')),
-                                      );
-                                      return;
-                                    }
-                                    if (!formKey.currentState!.validate()) return;
-
-                                    final limitReached = await _tankMeasurementLimitReached(
-                                      widget.tank.id,
-                                    );
-                                    if (limitReached) {
-                                      _showMeasurementLimitMessage();
-                                      return;
-                                    }
-
-                                    setSheet(() => saving = true);
-                                    try {
-                                      final payload = <String, dynamic>{
-                                        'id': const Uuid().v4(),
-                                        'tank_id': widget.tank.id,
-                                        'recorded_at': localWhen.toUtc().toIso8601String(),
-                                        'device_uid': null,
-                                      };
-
-                                      for (final spec in specs) {
-                                        final raw = ctrls[spec.type]!.text.trim();
-                                        if (raw.isEmpty) continue;
-                                        final parsed = double.tryParse(raw);
-                                        if (parsed == null) continue;
-                                        payload[spec.readingField] = spec.isTemperature
-                                            ? (_useFahrenheit ? parsed : _cToF(parsed))
-                                            : parsed;
-                                      }
-
-                                      final result = await OfflineStore.instance.saveReading(
-                                        client: Supabase.instance.client,
-                                        tankId: widget.tank.id,
-                                        payload: payload,
-                                      );
-
-                                      if (!mounted) return;
-                                      Navigator.pop(ctx, true);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            result == OfflineSaveResult.synced
-                                                ? 'Reading added'
-                                                : 'Reading saved offline and will sync when you reconnect',
-                                          ),
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      setSheet(() => saving = false);
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Save failed: $e')),
-                                      );
-                                    }
-                                  },
-                            label: const Text('Save'),
+                        const SizedBox(height: 12),
+                        for (final spec in specs) ...[
+                          _numField(
+                            _fieldLabelForSpec(spec),
+                            ctrls[spec.type]!,
+                            decimals: spec.decimals,
                           ),
+                          const SizedBox(height: 10),
+                        ],
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed:
+                                    saving
+                                        ? null
+                                        : () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: FilledButton.icon(
+                                icon:
+                                    saving
+                                        ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                        : const Icon(Icons.save),
+                                onPressed:
+                                    saving
+                                        ? null
+                                        : () async {
+                                          final anyEntered = ctrls.values.any(
+                                            (c) => c.text.trim().isNotEmpty,
+                                          );
+                                          if (!anyEntered) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Enter at least one parameter.',
+                                                ),
+                                              ),
+                                            );
+                                            return;
+                                          }
+                                          if (!formKey.currentState!.validate())
+                                            return;
+
+                                          final limitReached =
+                                              await _tankMeasurementLimitReached(
+                                                widget.tank.id,
+                                              );
+                                          if (limitReached) {
+                                            _showMeasurementLimitMessage();
+                                            return;
+                                          }
+
+                                          setSheet(() => saving = true);
+                                          try {
+                                            final payload = <String, dynamic>{
+                                              'id': const Uuid().v4(),
+                                              'tank_id': widget.tank.id,
+                                              'recorded_at':
+                                                  localWhen
+                                                      .toUtc()
+                                                      .toIso8601String(),
+                                              'device_uid': null,
+                                            };
+
+                                            for (final spec in specs) {
+                                              final raw =
+                                                  ctrls[spec.type]!.text.trim();
+                                              if (raw.isEmpty) continue;
+                                              final parsed = double.tryParse(
+                                                raw,
+                                              );
+                                              if (parsed == null) continue;
+                                              payload[spec.readingField] =
+                                                  spec.isTemperature
+                                                      ? (_useFahrenheit
+                                                          ? parsed
+                                                          : _cToF(parsed))
+                                                      : parsed;
+                                            }
+
+                                            final result = await OfflineStore
+                                                .instance
+                                                .saveReading(
+                                                  client:
+                                                      Supabase.instance.client,
+                                                  tankId: widget.tank.id,
+                                                  payload: payload,
+                                                );
+
+                                            if (!mounted) return;
+                                            Navigator.pop(ctx, true);
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  result ==
+                                                          OfflineSaveResult
+                                                              .synced
+                                                      ? 'Reading added'
+                                                      : 'Reading saved offline and will sync when you reconnect',
+                                                ),
+                                              ),
+                                            );
+                                          } catch (e) {
+                                            setSheet(() => saving = false);
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  'Save failed: $e',
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                label: const Text('Save'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
     );
 
     if (saved == true) {
       await _loadMeasurements();
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Manual reading saved')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Manual reading saved')));
     }
   }
 
@@ -1762,8 +1991,10 @@ Widget _logoAvatarFallback({required double size}) {
   }) {
     return TextFormField(
       controller: c,
-      keyboardType:
-          const TextInputType.numberWithOptions(decimal: true, signed: false),
+      keyboardType: const TextInputType.numberWithOptions(
+        decimal: true,
+        signed: false,
+      ),
       decoration: InputDecoration(
         border: const OutlineInputBorder(),
         labelText: label,
@@ -1773,7 +2004,12 @@ Widget _logoAvatarFallback({required double size}) {
     );
   }
 
-  static String? _optionalRange(String? v, double lo, double hi, String msgIfBad) {
+  static String? _optionalRange(
+    String? v,
+    double lo,
+    double hi,
+    String msgIfBad,
+  ) {
     final s = v?.trim() ?? '';
     if (s.isEmpty) return null;
     final n = double.tryParse(s);
@@ -1797,30 +2033,37 @@ Widget _logoAvatarFallback({required double size}) {
       ...kTankParameterSpecs.expand((spec) => [spec.minField, spec.maxField]),
     ].join(', ');
 
-    final row = await supa
-        .from('tanks')
-        .select(selectFields)
-        .eq('id', widget.tank.id)
-        .maybeSingle();
+    final row =
+        await supa
+            .from('tanks')
+            .select(selectFields)
+            .eq('id', widget.tank.id)
+            .maybeSingle();
 
     final dbName = (row?['name'] as String?) ?? widget.tank.name;
     final dbLiters =
         (row?['volume_liters'] as num?)?.toDouble() ?? widget.tank.volumeLiters;
-    final dbGallons = (row?['volume_gallons'] as num?)?.toDouble() ??
+    final dbGallons =
+        (row?['volume_gallons'] as num?)?.toDouble() ??
         (dbLiters / 3.785411784);
     final dbWater =
-        (row?['water_type'] as String?) ?? (widget.tank.waterType ?? 'freshwater');
+        (row?['water_type'] as String?) ??
+        (widget.tank.waterType ?? 'freshwater');
     final dbImageUrl = (row?['image_url'] as String?) ?? widget.tank.imageUrl;
 
     final name = TextEditingController(text: dbName);
     final initialDisplayVol = _useGallons ? dbGallons : dbLiters;
-    final vol = TextEditingController(text: initialDisplayVol.toStringAsFixed(0));
+    final vol = TextEditingController(
+      text: initialDisplayVol.toStringAsFixed(0),
+    );
     String water = dbWater;
     String? imageUrl = dbImageUrl;
 
     final tracking = <ParamType, bool>{
       for (final spec in kTankParameterSpecs)
-        spec.type: (row?[spec.trackingField] as bool?) ?? widget.tank.isTracking(spec.type),
+        spec.type:
+            (row?[spec.trackingField] as bool?) ??
+            widget.tank.isTracking(spec.type),
     };
     final minCtrls = <ParamType, TextEditingController>{};
     final maxCtrls = <ParamType, TextEditingController>{};
@@ -1828,8 +2071,10 @@ Widget _logoAvatarFallback({required double size}) {
       final range = widget.tank.rangeFor(spec.type);
       final minValue = (row?[spec.minField] as num?)?.toDouble() ?? range.start;
       final maxValue = (row?[spec.maxField] as num?)?.toDouble() ?? range.end;
-      final displayMin = spec.isTemperature && !_useFahrenheit ? _fToC(minValue) : minValue;
-      final displayMax = spec.isTemperature && !_useFahrenheit ? _fToC(maxValue) : maxValue;
+      final displayMin =
+          spec.isTemperature && !_useFahrenheit ? _fToC(minValue) : minValue;
+      final displayMax =
+          spec.isTemperature && !_useFahrenheit ? _fToC(maxValue) : maxValue;
       minCtrls[spec.type] = TextEditingController(
         text: displayMin.toStringAsFixed(spec.decimals),
       );
@@ -1852,9 +2097,10 @@ Widget _logoAvatarFallback({required double size}) {
         return StatefulBuilder(
           builder: (ctx, setSheet) {
             final hasImage = imageUrl != null && imageUrl!.trim().isNotEmpty;
-            final activeSpecs = kTankParameterSpecs
-                .where((spec) => tracking[spec.type] ?? false)
-                .toList();
+            final activeSpecs =
+                kTankParameterSpecs
+                    .where((spec) => tracking[spec.type] ?? false)
+                    .toList();
 
             Future<void> handleDelete() async {
               final deleted = await _confirmAndDeleteTank();
@@ -1888,15 +2134,20 @@ Widget _logoAvatarFallback({required double size}) {
                         CircleAvatar(
                           radius: 28,
                           backgroundColor: Colors.grey.shade700,
-                          backgroundImage: hasImage ? NetworkImage(imageUrl!) : null,
-                          child: hasImage ? null : _logoAvatarFallback(size: 56),
+                          backgroundImage:
+                              hasImage ? NetworkImage(imageUrl!) : null,
+                          child:
+                              hasImage ? null : _logoAvatarFallback(size: 56),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton.icon(
                             onPressed: () async {
-                              final newUrl = await _pickAndUploadProfileImage(widget.tank.id);
-                              if (newUrl != null) setSheet(() => imageUrl = newUrl);
+                              final newUrl = await _pickAndUploadProfileImage(
+                                widget.tank.id,
+                              );
+                              if (newUrl != null)
+                                setSheet(() => imageUrl = newUrl);
                             },
                             icon: const Icon(Icons.photo_camera),
                             label: const Text('Change profile photo'),
@@ -1917,11 +2168,21 @@ Widget _logoAvatarFallback({required double size}) {
                         border: OutlineInputBorder(),
                       ),
                       items: const [
-                        DropdownMenuItem(value: 'freshwater', child: Text('Freshwater')),
-                        DropdownMenuItem(value: 'saltwater', child: Text('Saltwater')),
-                        DropdownMenuItem(value: 'brackish', child: Text('Brackish')),
+                        DropdownMenuItem(
+                          value: 'freshwater',
+                          child: Text('Freshwater'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'saltwater',
+                          child: Text('Saltwater'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'brackish',
+                          child: Text('Brackish'),
+                        ),
                       ],
-                      onChanged: (v) => setSheet(() => water = v ?? 'freshwater'),
+                      onChanged:
+                          (v) => setSheet(() => water = v ?? 'freshwater'),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -1993,18 +2254,16 @@ Widget _logoAvatarFallback({required double size}) {
                                                       tracking[spec.type] ??
                                                       false,
                                                   label: Text(spec.label),
-                                                  selectedColor:
-                                                      RotalaColors.teal
-                                                          .withValues(
-                                                            alpha: 0.25,
-                                                          ),
+                                                  selectedColor: RotalaColors
+                                                      .teal
+                                                      .withValues(alpha: 0.25),
                                                   checkmarkColor: Colors.white,
-                                                  labelStyle:
-                                                      const TextStyle(
-                                                        color: Colors.white,
-                                                      ),
-                                                  backgroundColor:
-                                                      const Color(0xFF0b1220),
+                                                  labelStyle: const TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                  backgroundColor: const Color(
+                                                    0xFF0b1220,
+                                                  ),
                                                   side: BorderSide(
                                                     color: spec.color
                                                         .withValues(
@@ -2026,9 +2285,8 @@ Widget _logoAvatarFallback({required double size}) {
                                             width: double.infinity,
                                             child: FilledButton(
                                               onPressed:
-                                                  () => Navigator.pop(
-                                                    managerCtx,
-                                                  ),
+                                                  () =>
+                                                      Navigator.pop(managerCtx),
                                               child: const Text('Done'),
                                             ),
                                           ),
@@ -2093,10 +2351,7 @@ Widget _logoAvatarFallback({required double size}) {
                                   ),
                                   builder: (managerCtx) {
                                     return StatefulBuilder(
-                                      builder: (
-                                        managerCtx,
-                                        setManagerState,
-                                      ) {
+                                      builder: (managerCtx, setManagerState) {
                                         return Padding(
                                           padding: EdgeInsets.only(
                                             left: 16,
@@ -2118,8 +2373,7 @@ Widget _logoAvatarFallback({required double size}) {
                                                 style: TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 18,
-                                                  fontWeight:
-                                                      FontWeight.bold,
+                                                  fontWeight: FontWeight.bold,
                                                 ),
                                               ),
                                               const SizedBox(height: 8),
@@ -2155,8 +2409,7 @@ Widget _logoAvatarFallback({required double size}) {
                                                           Colors.white,
                                                       labelStyle:
                                                           const TextStyle(
-                                                            color:
-                                                                Colors.white,
+                                                            color: Colors.white,
                                                           ),
                                                       backgroundColor:
                                                           const Color(
@@ -2258,9 +2511,7 @@ Widget _logoAvatarFallback({required double size}) {
                                             );
                                         final unit =
                                             spec.isTemperature
-                                                ? (_useFahrenheit
-                                                    ? 'F'
-                                                    : 'C')
+                                                ? (_useFahrenheit ? 'F' : 'C')
                                                 : spec.unitLabel;
                                         return Padding(
                                           padding: EdgeInsets.only(
@@ -2323,11 +2574,10 @@ Widget _logoAvatarFallback({required double size}) {
                                                         ),
                                                         Text(
                                                           'Ideal range: ${_rangeSummaryText(spec, minCtrl, maxCtrl)}',
-                                                          style:
-                                                              const TextStyle(
-                                                                color: Colors
-                                                                    .white70,
-                                                              ),
+                                                          style: const TextStyle(
+                                                            color:
+                                                                Colors.white70,
+                                                          ),
                                                         ),
                                                       ],
                                                     ),
@@ -2361,8 +2611,9 @@ Widget _logoAvatarFallback({required double size}) {
                                                           const Text(
                                                             'Min',
                                                             style: TextStyle(
-                                                              color: Colors
-                                                                  .white54,
+                                                              color:
+                                                                  Colors
+                                                                      .white54,
                                                               fontSize: 12,
                                                             ),
                                                           ),
@@ -2373,17 +2624,18 @@ Widget _logoAvatarFallback({required double size}) {
                                                             controller: minCtrl,
                                                             keyboardType:
                                                                 const TextInputType.numberWithOptions(
-                                                                  decimal:
-                                                                      true,
+                                                                  decimal: true,
                                                                 ),
                                                             onChanged:
-                                                                (_) => setEditorState(
-                                                                  () {},
-                                                                ),
+                                                                (_) =>
+                                                                    setEditorState(
+                                                                      () {},
+                                                                    ),
                                                             style:
                                                                 const TextStyle(
-                                                                  color: Colors
-                                                                      .white,
+                                                                  color:
+                                                                      Colors
+                                                                          .white,
                                                                   fontSize: 18,
                                                                   fontWeight:
                                                                       FontWeight
@@ -2403,8 +2655,9 @@ Widget _logoAvatarFallback({required double size}) {
                                                                       : unit,
                                                               suffixStyle:
                                                                   const TextStyle(
-                                                                    color: Colors
-                                                                        .white,
+                                                                    color:
+                                                                        Colors
+                                                                            .white,
                                                                     fontSize:
                                                                         18,
                                                                     fontWeight:
@@ -2442,8 +2695,9 @@ Widget _logoAvatarFallback({required double size}) {
                                                           const Text(
                                                             'Max',
                                                             style: TextStyle(
-                                                              color: Colors
-                                                                  .white54,
+                                                              color:
+                                                                  Colors
+                                                                      .white54,
                                                               fontSize: 12,
                                                             ),
                                                           ),
@@ -2454,17 +2708,18 @@ Widget _logoAvatarFallback({required double size}) {
                                                             controller: maxCtrl,
                                                             keyboardType:
                                                                 const TextInputType.numberWithOptions(
-                                                                  decimal:
-                                                                      true,
+                                                                  decimal: true,
                                                                 ),
                                                             onChanged:
-                                                                (_) => setEditorState(
-                                                                  () {},
-                                                                ),
+                                                                (_) =>
+                                                                    setEditorState(
+                                                                      () {},
+                                                                    ),
                                                             style:
                                                                 const TextStyle(
-                                                                  color: Colors
-                                                                      .white,
+                                                                  color:
+                                                                      Colors
+                                                                          .white,
                                                                   fontSize: 18,
                                                                   fontWeight:
                                                                       FontWeight
@@ -2484,8 +2739,9 @@ Widget _logoAvatarFallback({required double size}) {
                                                                       : unit,
                                                               suffixStyle:
                                                                   const TextStyle(
-                                                                    color: Colors
-                                                                        .white,
+                                                                    color:
+                                                                        Colors
+                                                                            .white,
                                                                     fontSize:
                                                                         18,
                                                                     fontWeight:
@@ -2502,26 +2758,20 @@ Widget _logoAvatarFallback({required double size}) {
                                               ),
                                               const SizedBox(height: 14),
                                               SliderTheme(
-                                                data: SliderTheme.of(editorCtx)
-                                                    .copyWith(
-                                                      activeTrackColor:
-                                                          spec.color,
-                                                      inactiveTrackColor: spec
-                                                          .color
-                                                          .withValues(
-                                                            alpha: 0.20,
-                                                          ),
-                                                      thumbColor: spec.color,
-                                                      overlayColor: spec.color
-                                                          .withValues(
-                                                            alpha: 0.18,
-                                                          ),
-                                                      rangeThumbShape:
-                                                          const RoundRangeSliderThumbShape(
-                                                            enabledThumbRadius:
-                                                                8,
-                                                          ),
-                                                    ),
+                                                data: SliderTheme.of(
+                                                  editorCtx,
+                                                ).copyWith(
+                                                  activeTrackColor: spec.color,
+                                                  inactiveTrackColor: spec.color
+                                                      .withValues(alpha: 0.20),
+                                                  thumbColor: spec.color,
+                                                  overlayColor: spec.color
+                                                      .withValues(alpha: 0.18),
+                                                  rangeThumbShape:
+                                                      const RoundRangeSliderThumbShape(
+                                                        enabledThumbRadius: 8,
+                                                      ),
+                                                ),
                                                 child: RangeSlider(
                                                   min: sliderMin,
                                                   max: sliderMax,
@@ -2611,8 +2861,7 @@ Widget _logoAvatarFallback({required double size}) {
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       Row(
                                         children: [
@@ -2742,20 +2991,27 @@ Widget _logoAvatarFallback({required double size}) {
       final maxRaw = maxCtrls[spec.type]!.text.trim();
       final minParsed = double.tryParse(minRaw);
       final maxParsed = double.tryParse(maxRaw);
-      payload[spec.minField] = minParsed == null
-          ? null
-          : (spec.isTemperature && !_useFahrenheit ? _cToF(minParsed) : minParsed);
-      payload[spec.maxField] = maxParsed == null
-          ? null
-          : (spec.isTemperature && !_useFahrenheit ? _cToF(maxParsed) : maxParsed);
+      payload[spec.minField] =
+          minParsed == null
+              ? null
+              : (spec.isTemperature && !_useFahrenheit
+                  ? _cToF(minParsed)
+                  : minParsed);
+      payload[spec.maxField] =
+          maxParsed == null
+              ? null
+              : (spec.isTemperature && !_useFahrenheit
+                  ? _cToF(maxParsed)
+                  : maxParsed);
     }
 
     await supa.from('tanks').update(payload).eq('id', widget.tank.id);
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Tank updated')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Tank updated')));
 
     setState(() {
       widget.tank.name = name.text.trim();
@@ -2771,12 +3027,14 @@ Widget _logoAvatarFallback({required double size}) {
           maxParsed ?? spec.defaultMax,
         );
         if (spec.type == ParamType.temperature) {
-          widget.tank.idealTempMin = minParsed == null
-              ? null
-              : (_useFahrenheit ? minParsed : _cToF(minParsed));
-          widget.tank.idealTempMax = maxParsed == null
-              ? null
-              : (_useFahrenheit ? maxParsed : _cToF(maxParsed));
+          widget.tank.idealTempMin =
+              minParsed == null
+                  ? null
+                  : (_useFahrenheit ? minParsed : _cToF(minParsed));
+          widget.tank.idealTempMax =
+              maxParsed == null
+                  ? null
+                  : (_useFahrenheit ? maxParsed : _cToF(maxParsed));
         } else if (spec.type == ParamType.ph) {
           widget.tank.idealPhMin = minParsed;
           widget.tank.idealPhMax = maxParsed;
@@ -2796,22 +3054,23 @@ Widget _logoAvatarFallback({required double size}) {
   Future<bool> _confirmAndDeleteTank() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dctx) => AlertDialog(
-        title: const Text('Delete tank?'),
-        content: const Text(
-          'This will permanently delete this tank, its readings, notes, photos, and tasks. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dctx, false),
-            child: const Text('Cancel'),
+      builder:
+          (dctx) => AlertDialog(
+            title: const Text('Delete tank?'),
+            content: const Text(
+              'This will permanently delete this tank, its readings, notes, photos, and tasks. This cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dctx, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
 
     if (ok != true) return false;
@@ -2827,11 +3086,15 @@ Widget _logoAvatarFallback({required double size}) {
       await supa.from('sensor_readings').delete().eq('tank_id', tankId);
 
       // 3) notes + photos (delete storage first)
-      final noteRows = await supa.from('tank_notes').select('id').eq('tank_id', tankId);
-      final noteIds = (noteRows as List)
-          .map((r) => r['id'] as String?)
-          .whereType<String>()
-          .toList();
+      final noteRows = await supa
+          .from('tank_notes')
+          .select('id')
+          .eq('tank_id', tankId);
+      final noteIds =
+          (noteRows as List)
+              .map((r) => r['id'] as String?)
+              .whereType<String>()
+              .toList();
 
       if (noteIds.isNotEmpty) {
         final photoRows = await supa
@@ -2839,16 +3102,20 @@ Widget _logoAvatarFallback({required double size}) {
             .select('storage_path')
             .inFilter('note_id', noteIds);
 
-        final paths = (photoRows as List)
-            .map((r) => (r['storage_path'] as String?) ?? '')
-            .where((p) => p.trim().isNotEmpty)
-            .toList();
+        final paths =
+            (photoRows as List)
+                .map((r) => (r['storage_path'] as String?) ?? '')
+                .where((p) => p.trim().isNotEmpty)
+                .toList();
 
         if (paths.isNotEmpty) {
           await supa.storage.from('tank-notes').remove(paths);
         }
 
-        await supa.from('tank_note_photos').delete().inFilter('note_id', noteIds);
+        await supa
+            .from('tank_note_photos')
+            .delete()
+            .inFilter('note_id', noteIds);
         await supa.from('tank_notes').delete().eq('tank_id', tankId);
       }
 
@@ -2863,9 +3130,9 @@ Widget _logoAvatarFallback({required double size}) {
     } catch (e, st) {
       debugPrint('Delete tank failed: $e\n$st');
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       return false;
     }
   }
@@ -2896,11 +3163,12 @@ Widget _logoAvatarFallback({required double size}) {
   }
 
   String _lastMeasuredLabel() {
-    final all = _trackedParams
-        .map(latestFor)
-        .whereType<ParameterReading>()
-        .map((reading) => reading.timestamp)
-        .toList();
+    final all =
+        _trackedParams
+            .map(latestFor)
+            .whereType<ParameterReading>()
+            .map((reading) => reading.timestamp)
+            .toList();
     if (all.isEmpty) return 'No data';
     final latest = all.reduce((a, b) => a.isAfter(b) ? a : b);
     var diff = DateTime.now().difference(latest);
@@ -2912,10 +3180,10 @@ Widget _logoAvatarFallback({required double size}) {
   }
 
   String _labelForWaterType(String v) => switch (v) {
-        'saltwater' => 'Saltwater',
-        'brackish' => 'Brackish',
-        _ => 'Freshwater',
-      };
+    'saltwater' => 'Saltwater',
+    'brackish' => 'Brackish',
+    _ => 'Freshwater',
+  };
 
   String _labelForParam(ParamType t) => specFor(t).label;
 
@@ -2939,9 +3207,7 @@ Widget _logoAvatarFallback({required double size}) {
     final minText = _formatRangeInputValue(spec, minCtrl.text);
     final maxText = _formatRangeInputValue(spec, maxCtrl.text);
     final unit =
-        spec.isTemperature
-            ? (_useFahrenheit ? 'F' : 'C')
-            : spec.unitLabel;
+        spec.isTemperature ? (_useFahrenheit ? 'F' : 'C') : spec.unitLabel;
     return unit.isEmpty ? '$minText - $maxText' : '$minText - $maxText $unit';
   }
 
@@ -2968,9 +3234,11 @@ Widget _logoAvatarFallback({required double size}) {
     final baseMin = _sliderMinForSpec(spec);
     final currentMin = double.tryParse(minCtrl.text.trim());
     final currentMax = double.tryParse(maxCtrl.text.trim());
-    return [baseMin, currentMin, currentMax]
-        .whereType<double>()
-        .reduce((a, b) => a < b ? a : b);
+    return [
+      baseMin,
+      currentMin,
+      currentMax,
+    ].whereType<double>().reduce((a, b) => a < b ? a : b);
   }
 
   double _effectiveSliderMaxForSpec(
@@ -2981,9 +3249,11 @@ Widget _logoAvatarFallback({required double size}) {
     final baseMax = _sliderMaxForSpec(spec);
     final currentMin = double.tryParse(minCtrl.text.trim());
     final currentMax = double.tryParse(maxCtrl.text.trim());
-    return [baseMax, currentMin, currentMax]
-        .whereType<double>()
-        .reduce((a, b) => a > b ? a : b);
+    return [
+      baseMax,
+      currentMin,
+      currentMax,
+    ].whereType<double>().reduce((a, b) => a > b ? a : b);
   }
 
   RangeValues _sliderValuesForSpec(
@@ -3030,8 +3300,10 @@ Widget _logoAvatarFallback({required double size}) {
     final value = point.valueFor(type);
     if (value == null) return null;
     final spec = specFor(type);
-    final displayValue = spec.isTemperature && _useFahrenheit ? _cToF(value) : value;
-    final unit = spec.isTemperature ? (_useFahrenheit ? 'F' : 'C') : spec.unitLabel;
+    final displayValue =
+        spec.isTemperature && _useFahrenheit ? _cToF(value) : value;
+    final unit =
+        spec.isTemperature ? (_useFahrenheit ? 'F' : 'C') : spec.unitLabel;
     final valueText = displayValue.toStringAsFixed(spec.decimals);
     return unit.isEmpty || unit == spec.label
         ? '${spec.label}: $valueText'
@@ -3053,18 +3325,23 @@ Widget _logoAvatarFallback({required double size}) {
       final ext = xfile.path.split('.').last.toLowerCase();
       final path = '$uid/tanks/$tankId/profile_$id.$ext';
 
-      await Supabase.instance.client.storage.from('tank-images').upload(
+      await Supabase.instance.client.storage
+          .from('tank-images')
+          .upload(
             path,
             File(xfile.path),
             fileOptions: const FileOptions(upsert: true),
           );
 
-      return Supabase.instance.client.storage.from('tank-images').getPublicUrl(path);
+      return Supabase.instance.client.storage
+          .from('tank-images')
+          .getPublicUrl(path);
     } catch (e, st) {
       debugPrint('Upload failed: $e\n$st');
       if (!mounted) return null;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
       return null;
     }
   }
@@ -3089,8 +3366,8 @@ class Tank {
     this.idealTdsMax,
     Map<ParamType, bool>? tracking,
     Map<ParamType, RangeValues>? idealRanges,
-  })  : tracking = tracking ?? {},
-        idealRanges = idealRanges ?? {};
+  }) : tracking = tracking ?? {},
+       idealRanges = idealRanges ?? {};
 
   final String id;
   String name;
@@ -3109,9 +3386,11 @@ class Tank {
 
   double get volumeGallons => volumeLiters / 3.785411784;
 
-  bool isTracking(ParamType type) => tracking[type] ?? specFor(type).defaultTracked;
+  bool isTracking(ParamType type) =>
+      tracking[type] ?? specFor(type).defaultTracked;
 
-  RangeValues rangeFor(ParamType type) => idealRanges[type] ??
+  RangeValues rangeFor(ParamType type) =>
+      idealRanges[type] ??
       RangeValues(specFor(type).defaultMin, specFor(type).defaultMax);
 }
 
@@ -3135,11 +3414,11 @@ class MeasurePoint {
   final String? deviceUid;
 
   double? valueFor(ParamType type) => switch (type) {
-        ParamType.temperature => tempC ?? values[type],
-        ParamType.ph => ph ?? values[type],
-        ParamType.tds => tds ?? values[type],
-        _ => values[type],
-      };
+    ParamType.temperature => tempC ?? values[type],
+    ParamType.ph => ph ?? values[type],
+    ParamType.tds => tds ?? values[type],
+    _ => values[type],
+  };
 }
 
 class ParameterReading {
@@ -3170,10 +3449,10 @@ class NotePhoto {
   });
 
   factory NotePhoto.fromRow(Map<String, dynamic> r) => NotePhoto(
-        id: (r['id'] as String?) ?? const Uuid().v4(),
-        storagePath: r['storage_path'],
-        publicUrl: r['public_url'],
-      );
+    id: (r['id'] as String?) ?? const Uuid().v4(),
+    storagePath: r['storage_path'],
+    publicUrl: r['public_url'],
+  );
 }
 
 class NoteItem {
@@ -3196,18 +3475,18 @@ class NoteItem {
   });
 
   factory NoteItem.fromRow(Map<String, dynamic> r) => NoteItem(
-        id: r['id'],
-        title: r['title'] ?? '',
-        body: r['body'] ?? '',
-        createdAt: DateTime.parse(r['created_at']).toLocal(),
-        updatedAt: r['updated_at'] == null
+    id: r['id'],
+    title: r['title'] ?? '',
+    body: r['body'] ?? '',
+    createdAt: DateTime.parse(r['created_at']).toLocal(),
+    updatedAt:
+        r['updated_at'] == null
             ? null
             : DateTime.parse(r['updated_at']).toLocal(),
-        userId: r['user_id'],
-        photos: (r['photos'] as List? ?? [])
-            .map((p) => NotePhoto.fromRow(p))
-            .toList(),
-      );
+    userId: r['user_id'],
+    photos:
+        (r['photos'] as List? ?? []).map((p) => NotePhoto.fromRow(p)).toList(),
+  );
 }
 
 class TaskItem {
@@ -3226,12 +3505,12 @@ class TaskItem {
   });
 
   factory TaskItem.fromRow(Map<String, dynamic> r) => TaskItem(
-        id: r['id'],
-        title: r['title'],
-        done: r['done'] == true,
-        due: r['due_at'] == null ? null : DateTime.parse(r['due_at']).toLocal(),
-        readingId: r['reading_id'],
-      );
+    id: r['id'],
+    title: r['title'],
+    done: r['done'] == true,
+    due: r['due_at'] == null ? null : DateTime.parse(r['due_at']).toLocal(),
+    readingId: r['reading_id'],
+  );
 }
 
 // ----------------------------- Card widget -----------------------------
@@ -3250,9 +3529,10 @@ class _MiniParameterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? color : const Color(0xFF1f2937);
+    final cs = Theme.of(context).colorScheme;
+    final bg = selected ? color : cs.surfaceContainerHighest;
     final fg = selected ? Colors.white : color;
-    final labelColor = Colors.white70;
+    final labelColor = selected ? Colors.white70 : cs.onSurfaceVariant;
 
     final spec = specFor(reading.type);
     final valueStr = reading.value.toStringAsFixed(spec.decimals);
@@ -3289,7 +3569,11 @@ class _MiniParameterCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '$valueStr ${reading.unit}',
-                style: TextStyle(color: fg, fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -3301,9 +3585,19 @@ class _MiniParameterCard extends StatelessWidget {
             child: Container(
               width: 18,
               height: 18,
-              decoration: const BoxDecoration(color: Color(0xFFE74C3C), shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                color: Color(0xFFE74C3C),
+                shape: BoxShape.circle,
+              ),
               child: const Center(
-                child: Text('!', style: TextStyle(color: Colors.white, fontSize: 12, height: 1)),
+                child: Text(
+                  '!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    height: 1,
+                  ),
+                ),
               ),
             ),
           ),
@@ -3315,6 +3609,3 @@ class _MiniParameterCard extends StatelessWidget {
 
   static IconData _iconFor(ParamType t) => specFor(t).icon;
 }
-
-
-

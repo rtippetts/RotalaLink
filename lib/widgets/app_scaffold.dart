@@ -40,9 +40,8 @@ class _AppScaffoldState extends State<AppScaffold> {
     if (user == null) return '';
 
     final md = user.userMetadata ?? {};
-    final displayName = (md['display_name'] ?? md['username'] ?? '')
-        .toString()
-        .trim();
+    final displayName =
+        (md['display_name'] ?? md['username'] ?? '').toString().trim();
     if (displayName.isNotEmpty) return displayName;
 
     final email = (user.email ?? '').trim();
@@ -54,10 +53,11 @@ class _AppScaffoldState extends State<AppScaffold> {
     final label = _profileLabel(user);
     if (label.isEmpty) return 'U';
 
-    final parts = label
-        .split(RegExp(r'[\s,_-]+'))
-        .where((part) => part.isNotEmpty)
-        .toList();
+    final parts =
+        label
+            .split(RegExp(r'[\s,_-]+'))
+            .where((part) => part.isNotEmpty)
+            .toList();
 
     if (parts.isEmpty) return label.substring(0, 1).toUpperCase();
     if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
@@ -78,9 +78,9 @@ class _AppScaffoldState extends State<AppScaffold> {
 
   Future<void> _openProfile() async {
     HapticFeedback.selectionClick();
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ProfilePage()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
   }
 
   Widget _pageForIndex(int index) {
@@ -190,7 +190,9 @@ class _AppScaffoldState extends State<AppScaffold> {
                           ),
                         ),
                         onPressed: () => Navigator.of(ctx).maybePop(),
-                        icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                        icon: const Icon(
+                          Icons.playlist_add_check_circle_outlined,
+                        ),
                         label: const Text('Select tank'),
                       ),
                     ),
@@ -209,7 +211,9 @@ class _AppScaffoldState extends State<AppScaffold> {
                           Navigator.of(ctx).maybePop();
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('RFID scanning is still in development'),
+                              content: Text(
+                                'RFID scanning is still in development',
+                              ),
                             ),
                           );
                         },
@@ -283,8 +287,9 @@ class _AppScaffoldState extends State<AppScaffold> {
     required IconData icon,
     required String label,
   }) {
+    final cs = Theme.of(context).colorScheme;
     final selected = widget.currentIndex == index;
-    final color = selected ? RotalaColors.teal : Colors.white70;
+    final color = selected ? RotalaColors.teal : cs.onSurfaceVariant;
 
     return Expanded(
       child: InkWell(
@@ -315,6 +320,7 @@ class _AppScaffoldState extends State<AppScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final user = Supabase.instance.client.auth.currentUser;
     final profileImageUrl = _profileImageUrl(user);
     final profileInitials = _profileInitials(user);
@@ -323,9 +329,9 @@ class _AppScaffoldState extends State<AppScaffold> {
     return Stack(
       children: [
         Scaffold(
-          backgroundColor: const Color(0xFF0b1220),
+          backgroundColor: cs.surface,
           appBar: AppBar(
-            backgroundColor: const Color(0xFF0b1220),
+            backgroundColor: cs.surface,
             elevation: 0,
             leadingWidth: widget.leadingSecondary == null ? 72 : 120,
             leading: Padding(
@@ -340,7 +346,9 @@ class _AppScaffoldState extends State<AppScaffold> {
                     padding: EdgeInsets.zero,
                     icon: CircleAvatar(
                       radius: 18,
-                      backgroundColor: RotalaColors.teal.withValues(alpha: 0.22),
+                      backgroundColor: RotalaColors.teal.withValues(
+                        alpha: 0.22,
+                      ),
                       backgroundImage:
                           profileImageUrl != null
                               ? NetworkImage(profileImageUrl)
@@ -349,8 +357,8 @@ class _AppScaffoldState extends State<AppScaffold> {
                           profileImageUrl == null
                               ? Text(
                                 profileInitials,
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                style: TextStyle(
+                                  color: cs.onSurface,
                                   fontWeight: FontWeight.w800,
                                   fontSize: 13,
                                 ),
@@ -368,17 +376,14 @@ class _AppScaffoldState extends State<AppScaffold> {
             ),
             title: Text(
               widget.title,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: cs.onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
             ),
             centerTitle: true,
-            actions: [
-              ...?widget.actions,
-              const SizedBox(width: 8),
-            ],
+            actions: [...?widget.actions, const SizedBox(width: 8)],
           ),
           body: widget.body,
           bottomNavigationBar: SafeArea(
@@ -391,14 +396,30 @@ class _AppScaffoldState extends State<AppScaffold> {
                 children: [
                   Container(
                     height: 60,
-                    color: const Color(0xFF101827),
+                    color: cs.surface,
                     child: Row(
                       children: [
-                        _navItem(index: 0, icon: Icons.home_rounded, label: 'Home'),
-                        _navItem(index: 1, icon: Icons.groups_rounded, label: 'Think Tank'),
+                        _navItem(
+                          index: 0,
+                          icon: Icons.home_rounded,
+                          label: 'Home',
+                        ),
+                        _navItem(
+                          index: 1,
+                          icon: Icons.groups_rounded,
+                          label: 'Think Tank',
+                        ),
                         const SizedBox(width: 64),
-                        _navItem(index: 2, icon: Icons.smart_toy_rounded, label: 'RALA'),
-                        _navItem(index: 3, icon: Icons.menu_book_rounded, label: 'Library'),
+                        _navItem(
+                          index: 2,
+                          icon: Icons.smart_toy_rounded,
+                          label: 'RALA',
+                        ),
+                        _navItem(
+                          index: 3,
+                          icon: Icons.menu_book_rounded,
+                          label: 'Library',
+                        ),
                       ],
                     ),
                   ),

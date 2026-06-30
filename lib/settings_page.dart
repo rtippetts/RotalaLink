@@ -6,7 +6,6 @@ import 'auth/reset_password.dart';
 import 'login_page.dart';
 import 'onboarding/walkthrough.dart';
 import 'tank_export.dart';
-import 'theme/rotala_brand.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -37,138 +36,129 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0b1220),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0b1220),
-        elevation: 0,
-        title: const Text(
-          'Settings',
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
+      appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF122033),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Column(
-              children: [
-                ValueListenableBuilder<bool>(
-                  valueListenable: AppSettings.useFahrenheit,
-                  builder: (context, useFahrenheit, _) {
-                    return SwitchListTile(
-                      value: useFahrenheit,
-                      onChanged: AppSettings.setUseFahrenheit,
-                      title: const Text(
-                        'Temperature units',
-                        style: TextStyle(color: Colors.white),
+          _Section(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Appearance',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
-                      subtitle: Text(
-                        useFahrenheit ? 'Using F' : 'Using C',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      activeColor: RotalaColors.teal,
-                    );
-                  },
+                    ),
+                    const SizedBox(height: 12),
+                    ValueListenableBuilder<ThemeMode>(
+                      valueListenable: AppSettings.themeMode,
+                      builder: (context, themeMode, _) {
+                        return SegmentedButton<ThemeMode>(
+                          segments: const [
+                            ButtonSegment(
+                              value: ThemeMode.light,
+                              icon: Icon(Icons.light_mode_outlined),
+                              label: Text('Light'),
+                            ),
+                            ButtonSegment(
+                              value: ThemeMode.dark,
+                              icon: Icon(Icons.dark_mode_outlined),
+                              label: Text('Dark'),
+                            ),
+                          ],
+                          selected: {themeMode},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (selection) {
+                            AppSettings.setThemeMode(selection.first);
+                          },
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                const Divider(height: 1, color: Colors.white12),
-                ValueListenableBuilder<bool>(
-                  valueListenable: AppSettings.useGallons,
-                  builder: (context, useGallons, _) {
-                    return SwitchListTile(
-                      value: useGallons,
-                      onChanged: AppSettings.setUseGallons,
-                      title: const Text(
-                        'Tank volume units',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Text(
-                        useGallons ? 'Using gallons' : 'Using liters',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      activeColor: RotalaColors.teal,
-                    );
-                  },
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF122033),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(
-                    Icons.school_outlined,
-                    color: Colors.white70,
-                  ),
-                  title: const Text(
-                    'View app walkthrough',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'See the quick tour again',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  onTap: () => WalkthroughScreen.show(context),
+          _Section(
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useFahrenheit,
+                builder: (context, useFahrenheit, _) {
+                  return SwitchListTile(
+                    value: useFahrenheit,
+                    onChanged: AppSettings.setUseFahrenheit,
+                    title: const Text('Temperature units'),
+                    subtitle: Text(useFahrenheit ? 'Using F' : 'Using C'),
+                  );
+                },
+              ),
+              const Divider(height: 1),
+              ValueListenableBuilder<bool>(
+                valueListenable: AppSettings.useGallons,
+                builder: (context, useGallons, _) {
+                  return SwitchListTile(
+                    value: useGallons,
+                    onChanged: AppSettings.setUseGallons,
+                    title: const Text('Tank volume units'),
+                    subtitle: Text(
+                      useGallons ? 'Using gallons' : 'Using liters',
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _Section(
+            children: [
+              ListTile(
+                leading: Icon(
+                  Icons.school_outlined,
+                  color: cs.onSurfaceVariant,
                 ),
-                const Divider(height: 1, color: Colors.white12),
-                ListTile(
-                  leading: const Icon(
-                    Icons.lock_reset,
-                    color: Colors.white70,
-                  ),
-                  title: const Text(
-                    'Reset password',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  onTap:
-                      () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ResetPasswordPage(),
-                        ),
+                title: const Text('View app walkthrough'),
+                subtitle: const Text('See the quick tour again'),
+                onTap: () => WalkthroughScreen.show(context),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.lock_reset, color: cs.onSurfaceVariant),
+                title: const Text('Reset password'),
+                onTap:
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ResetPasswordPage(),
                       ),
+                    ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(
+                  Icons.file_download_outlined,
+                  color: cs.onSurfaceVariant,
                 ),
-                const Divider(height: 1, color: Colors.white12),
-                ListTile(
-                  leading: const Icon(
-                    Icons.file_download_outlined,
-                    color: Colors.white70,
-                  ),
-                  title: const Text(
-                    'Export tank data (CSV)',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  subtitle: const Text(
-                    'Download and share your tank readings',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  onTap: () => exportTankData(context),
-                ),
-              ],
-            ),
+                title: const Text('Export tank data (CSV)'),
+                subtitle: const Text('Download and share your tank readings'),
+                onTap: () => exportTankData(context),
+              ),
+            ],
           ),
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
+                backgroundColor: cs.error,
+                foregroundColor: cs.onError,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
               ),
               onPressed: _signOut,
               icon: const Icon(Icons.logout_rounded),
@@ -177,6 +167,26 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  const _Section({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outline),
+      ),
+      child: Column(children: children),
     );
   }
 }

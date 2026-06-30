@@ -71,6 +71,7 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
+    - assets/brand/Image_placeholder.png
     - assets/brand/rotalanew2.png
     - assets/brand/rotalafinalsquare2.png
     - assets/brand/rotalalink.png

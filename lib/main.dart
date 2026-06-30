@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // match system brightness
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'login_page.dart';
+import 'app_settings.dart';
 import 'auth/reset_password.dart';
 import 'ui/aqua_schemes.dart';
 import 'ui/aqua_theme.dart';
@@ -13,6 +12,7 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppSettings.load();
 
   // Initialize supabase once at startup
   await Supabase.initialize(
@@ -64,13 +64,18 @@ class _MyAppState extends State<MyApp> {
     final light = oceanCoreLight; // or coralLeadLight, deepBlueLight
     final dark = oceanCoreDark; // or coralLeadDark,  deepBlueDark
 
-    return MaterialApp(
-      navigatorKey: navigatorKey, // 👈 important!
-      title: 'Rotala',
-      theme: aquaTheme(light),
-      darkTheme: aquaTheme(dark),
-      themeMode: ThemeMode.dark,
-      home: RootRouter(), // 👈 route based on session
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: AppSettings.themeMode,
+      builder: (context, themeMode, _) {
+        return MaterialApp(
+          navigatorKey: navigatorKey, // 👈 important!
+          title: 'Rotala',
+          theme: aquaTheme(light),
+          darkTheme: aquaTheme(dark),
+          themeMode: themeMode,
+          home: RootRouter(), // 👈 route based on session
+        );
+      },
     );
   }
 }
