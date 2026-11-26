@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../tank_detail_page.dart';
-import '../app_settings.dart';
-import '../tank_parameters.dart';
+import 'tank_detail_page.dart';
+import 'app_settings.dart';
+import 'tank_parameters.dart';
 
 /// Shared label helper
 String _labelForWaterType(String v) {

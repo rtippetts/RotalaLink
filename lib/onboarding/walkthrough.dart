@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../theme/rotala_brand.dart'; // adjust path if needed
-import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
 
 const String kWalkthroughSeenKey = 'walkthrough_seen_v1';
 
@@ -64,28 +63,40 @@ class _WalkthroughScreenState extends State<WalkthroughScreen> {
 
   late final List<_WTPage> _pages = [
     _WTPage(
-      icon: MdiIcons.fishbowlOutline, // aquarium icon for Add tank
+      icon: Icons.water_outlined,
       title: 'Add your tanks',
       body:
           'Create a tank for each aquarium with its name, size, and water type so Rotala can keep everything organized.',
     ),
     const _WTPage(
       icon: Icons.add_chart,
-      title: 'Add parameter readings',
+      title: 'Record your water tests',
       body:
-          'Track your tank chemistry by logging pH, TDS, and temperature for each tank.',
+          'Tap Record, choose an aquarium, and enter your test results. Choose which parameters to track in Edit tank. No AquaSpec device is required.',
     ),
     const _WTPage(
       icon: Icons.add_task,
-      title: 'Set tasks and reminders',
+      title: 'Plan aquarium maintenance',
       body:
-          'Create tasks for water changes, filter cleanings, and other maintenance so you never miss a step.',
+          'Tap Tasks to organize water changes and filter cleaning by aquarium and due date. Check tasks off as you complete them. Tasks are shown in the app; they do not send notifications.',
+    ),
+    const _WTPage(
+      icon: Icons.show_chart,
+      title: 'Follow changes over time',
+      body:
+          'Open an aquarium to explore its charts and reading history. Set your own ideal ranges, then use Notes to keep a photo journal of changes.',
+    ),
+    const _WTPage(
+      icon: Icons.offline_bolt_outlined,
+      title: 'Keep readings when offline',
+      body:
+          'Previously loaded aquariums and readings stay on this device. New readings are saved locally when a connection is unavailable. Open the app and refresh after reconnecting to sync them.',
     ),
     const _WTPage(
       icon: Icons.settings,
       title: 'Configure your settings',
       body:
-          'Adjust temperature units, notifications, and other preferences. More options, including streaks and badges, are coming soon!',
+          'Tap Settings to choose light or dark mode, temperature units, and gallons or liters. Export your readings as a CSV file to share or keep a copy.',
     ),
   ];
 

@@ -1,7 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:your_app/models/tank_models.dart';
-import 'package:your_app/tank_detail/widgets/mini_parameter_card.dart';
+import 'models/tank_models.dart';
+import 'widgets/mini_parameter_card.dart';
 
 class TankOverviewTab extends StatelessWidget {
   const TankOverviewTab({

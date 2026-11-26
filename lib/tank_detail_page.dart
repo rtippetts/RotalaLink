@@ -10,17 +10,17 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart' as share;
 
 import 'offline_store.dart';
+import 'tank_export.dart';
 import 'theme/rotala_brand.dart';
 import 'app_settings.dart';
 import 'tank_parameters.dart';
 
 class TankDetailPage extends StatefulWidget {
-  const TankDetailPage({super.key, required this.tank});
+  const TankDetailPage({super.key, required this.tank, this.openReadingForm = false});
   final Tank tank;
+  final bool openReadingForm;
 
   @override
   State<TankDetailPage> createState() => _TankDetailPageState();
@@ -114,6 +114,12 @@ class _TankDetailPageState extends State<TankDetailPage>
     AppSettings.load();
 
     _refreshAll();
+    if (widget.openReadingForm) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await AppSettings.load();
+        if (mounted) await _openManualReadingForm();
+      });
+    }
   }
 
   @override
@@ -840,25 +846,31 @@ class _TankDetailPageState extends State<TankDetailPage>
 
     IconData secondaryIcon;
     VoidCallback? onPressed;
+    String label;
 
     switch (idx) {
       case 0:
+        label = 'Add reading';
         secondaryIcon = Icons.add_chart;
         onPressed = _openManualReadingForm;
         break;
       case 1:
+        label = 'Export CSV';
         secondaryIcon = Icons.file_download_outlined;
         onPressed = _exportTankCsv;
         break;
       case 2:
+        label = 'Add note';
         secondaryIcon = Icons.event_note;
         onPressed = () => _createOrEditNote();
         break;
       case 3:
+        label = 'Add task';
         secondaryIcon = Icons.add_task;
         onPressed = () => _createOrEditTask();
         break;
       default:
+        label = 'Add reading';
         secondaryIcon = Icons.science;
         onPressed = _openManualReadingForm;
         break;
@@ -874,96 +886,13 @@ class _TankDetailPageState extends State<TankDetailPage>
           Icon(secondaryIcon, size: 30, color: Colors.white),
         ],
       ),
-      label: const SizedBox.shrink(),
+      label: Text(label, style: const TextStyle(color: Colors.white)),
       extendedPadding: const EdgeInsets.fromLTRB(20, 20, 14, 20),
     );
   }
 
-  Future<void> _exportTankCsv() async {
-    try {
-      final supa = Supabase.instance.client;
+  Future<void> _exportTankCsv() => exportTankData(context, tankId: widget.tank.id);
 
-      final rows = await supa
-          .from('sensor_readings')
-          .select('recorded_at, temperature, ph, tds, device_uid')
-          .eq('tank_id', widget.tank.id)
-          .order('recorded_at', ascending: true);
-
-      final list = rows as List;
-
-      if (list.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No readings to export for this tank')),
-        );
-        return;
-      }
-
-      final buffer = StringBuffer();
-      buffer.writeln(
-        'recorded_at_local,recorded_at_utc,temperature_c,temperature_f,ph,tds_ppm,device_uid',
-      );
-
-      String fmtNum(num? n, {int decimals = 2}) {
-        if (n == null) return '';
-        return n.toStringAsFixed(decimals);
-      }
-
-      for (final r in list) {
-        final recordedUtc = DateTime.parse(r['recorded_at'] as String).toUtc();
-        final recordedLocal = recordedUtc.toLocal();
-
-        final tempF = (r['temperature'] as num?)?.toDouble(); // DB stores °F
-        final tempC = tempF == null ? null : _fToC(tempF);
-
-        final ph = (r['ph'] as num?)?.toDouble();
-        final tds = (r['tds'] as num?)?.toDouble();
-        final deviceUid = r['device_uid'] as String?;
-
-        buffer.writeln(
-          [
-            recordedLocal.toIso8601String(),
-            recordedUtc.toIso8601String(),
-            fmtNum(tempC, decimals: 2),
-            fmtNum(tempF, decimals: 2),
-            fmtNum(ph, decimals: 3),
-            fmtNum(tds, decimals: 0),
-            deviceUid ?? '',
-          ].join(','),
-        );
-      }
-
-      final dir = await getTemporaryDirectory();
-      final safeTankName =
-          widget.tank.name
-              .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
-              .toLowerCase();
-      final file = File('${dir.path}/tank_${safeTankName}_readings.csv');
-
-      await file.writeAsString(buffer.toString());
-
-      await share.Share.shareXFiles(
-        [share.XFile(file.path)],
-        text: 'Sensor readings for tank "${widget.tank.name}"',
-        subject: 'Tank readings export',
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Exported ${list.length} readings for ${widget.tank.name}',
-          ),
-        ),
-      );
-    } catch (e, st) {
-      debugPrint('CSV export failed: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('CSV export failed: $e')));
-    }
-  }
-
-  // ---------- Overview ----------
   Widget _buildOverview(Color card) {
     final cs = Theme.of(context).colorScheme;
     final tiles =
@@ -1310,6 +1239,7 @@ class _TankDetailPageState extends State<TankDetailPage>
                         _fieldLabelForSpec(spec),
                         ctrls[spec.type]!,
                         decimals: spec.decimals,
+                        validator: (value) => validateParameterReading(spec, value),
                       ),
                       const SizedBox(height: 8),
                     ],
@@ -1833,6 +1763,7 @@ class _TankDetailPageState extends State<TankDetailPage>
                             _fieldLabelForSpec(spec),
                             ctrls[spec.type]!,
                             decimals: spec.decimals,
+                            validator: (value) => validateParameterReading(spec, value),
                           ),
                           const SizedBox(height: 10),
                         ],

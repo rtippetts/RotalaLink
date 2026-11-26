@@ -12,6 +12,7 @@ import 'onboarding/walkthrough.dart';
 import 'tank_detail_page.dart';
 import 'tank_parameters.dart';
 import 'widgets/app_scaffold.dart';
+import 'widgets/record_tank_picker.dart';
 import 'app_settings.dart';
 import 'offline_store.dart';
 import 'tank_views.dart';
@@ -35,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   late final Stream<List<Map<String, dynamic>>> _tankStream;
 
   bool _retryingTanks = false;
+  bool _openingRecord = false;
 
   // Pull-to-refresh tick to force rebuild if needed
   int _refreshTick = 0;
@@ -336,7 +338,7 @@ class _HomePageState extends State<HomePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'We are still in development and due to data limits, you cannot add more than 10 tanks at a time. Thank you for being a beta tester!',
+          'You can keep up to 10 aquariums in Rotala. Delete an aquarium before adding another.',
         ),
         backgroundColor: Colors.orangeAccent,
       ),
@@ -774,6 +776,65 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _openRecordSheet() async {
+    if (_openingRecord) return;
+    final uid = _supa.auth.currentUser?.id;
+    if (uid == null) return;
+    _openingRecord = true;
+
+    try {
+      var rows = _latestTanks;
+      if (rows.isEmpty) {
+        rows = await OfflineStore.instance.getCachedTanks(uid);
+      }
+      if (rows.isEmpty) {
+        final remote = await _supa
+            .from('tanks')
+            .select()
+            .eq('user_id', uid)
+            .order('created_at')
+            .timeout(const Duration(seconds: 8));
+        rows = List<Map<String, dynamic>>.from(remote);
+      }
+      if (!mounted) return;
+
+      var addTank = false;
+      final selected = await showModalBottomSheet<Tank>(
+        context: context,
+        isScrollControlled: true,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        ),
+        builder: (ctx) => RecordTankPicker(
+          tanks: rows.map(_tankFromRow).toList(),
+          onAddTank: () {
+            addTank = true;
+            Navigator.of(ctx).pop();
+          },
+        ),
+      );
+      if (!mounted) return;
+      if (addTank) {
+        await _openAddTankSheet();
+      } else if (selected != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => TankDetailPage(tank: selected, openReadingForm: true),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not load your tanks. Connect to the internet and try again.'),
+        ),
+      );
+    } finally {
+      _openingRecord = false;
+    }
+  }
+
   Tank _tankFromRow(Map<String, dynamic> row) {
     final gallons = (row['volume_gallons'] as num?)?.toDouble() ?? 0;
     final rawImageUrl = (row['image_url'] as String?)?.trim();
@@ -842,59 +903,6 @@ class _HomePageState extends State<HomePage> {
     });
 
     await _saveLayoutMode();
-  }
-
-  Future<void> _openAssistantSheet() async {
-    final input = TextEditingController();
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1f2937),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Assistant',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: input,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Ask about your tanks or devices',
-                  hintStyle: TextStyle(color: Colors.white70),
-                  prefixIcon: Icon(Icons.smart_toy, color: Colors.white70),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Send'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   Future<void> _openTasksSheet() async {
@@ -2633,7 +2641,9 @@ class _HomePageState extends State<HomePage> {
 
     return AppScaffold(
       currentIndex: 0,
-      title: 'Dashboard',
+      title: 'My aquariums',
+      onRecord: _openRecordSheet,
+      onTasks: _openTasksSheet,
       leadingSecondary: IconButton(
         tooltip: 'Search tanks',
         padding: EdgeInsets.zero,
@@ -2653,6 +2663,8 @@ class _HomePageState extends State<HomePage> {
         right: 16,
         bottom: 92,
         child: FloatingActionButton(
+          heroTag: 'add_tank',
+          tooltip: 'Add tank',
           backgroundColor: RotalaColors.teal,
           onPressed: _openAddTankSheet,
           child: const Icon(Icons.add, size: 28, color: Colors.white),

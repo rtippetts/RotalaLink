@@ -316,6 +316,18 @@ const List<TankParameterSpec> kTankParameterSpecs = [
 TankParameterSpec specFor(ParamType type) =>
     kTankParameterSpecs.firstWhere((spec) => spec.type == type);
 
+String? validateParameterReading(TankParameterSpec spec, String? raw) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return null;
+  final value = double.tryParse(text);
+  if (value == null || !value.isFinite) return 'Enter a valid number';
+  if (spec.type == ParamType.ph && (value < 0 || value > 14)) {
+    return 'pH must be between 0 and 14';
+  }
+  if (!spec.isTemperature && value < 0) return 'Enter zero or a positive value';
+  return null;
+}
+
 Map<ParamType, bool> trackingMapFromRow(Map<String, dynamic> row) {
   return {
     for (final spec in kTankParameterSpecs)
