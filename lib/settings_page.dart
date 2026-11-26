@@ -180,11 +180,12 @@ class _Section extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: cs.surface,
+    return Material(
+      color: cs.surface,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outline),
+        side: BorderSide(color: cs.outline),
       ),
       child: Column(children: children),
     );

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:your_app/models/tank_models.dart';
+import 'models/tank_models.dart';
 
 class TankNotesTab extends StatelessWidget {
   const TankNotesTab({

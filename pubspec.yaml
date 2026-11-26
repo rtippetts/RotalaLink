@@ -1,5 +1,5 @@
 name: aquaspec
-description: "A new Flutter project."
+description: "Aquarium water testing, history, photo notes, and maintenance tracking."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
@@ -30,7 +30,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  material_design_icons_flutter: ^7.0.7296
   supabase_flutter: ^2.10.2
   flutter_reactive_ble: ^5.0.3
   permission_handler: ^12.0.1
